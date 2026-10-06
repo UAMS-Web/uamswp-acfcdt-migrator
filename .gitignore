@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Downloads from the migration screen (changes, backups, snapshots, archives) contain site data — never commit them
+*.jsonl
+*.csv
+*.sql
+
+# Editors
+.vscode/
+.idea/
