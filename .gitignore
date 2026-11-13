@@ -9,3 +9,4 @@
 # Editors
 .vscode/
 .idea/
+/vendor/

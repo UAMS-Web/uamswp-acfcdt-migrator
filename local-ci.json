@@ -1,0 +1,41 @@
+{
+  "base": "main",
+  "php": "8.4",
+  "chain": false,
+  "guard": {
+    "deny": [
+      "sentinel-key\\.php$",
+      "wp-config\\.php$",
+      "\\.sql(\\.gz)?$",
+      "\\.(csv|tsv|xlsx?)$",
+      "\\.env(\\.|$)",
+      "\\.pem$",
+      "\\.key$"
+    ]
+  },
+  "jobs": [
+    {
+      "name": "lint",
+      "run": "php -l",
+      "each": ["**/*.php", "!vendor/**"],
+      "always": true
+    },
+    {
+      "name": "synced-files",
+      "run": "node .claude/skills/synced-files/scripts/check-synced-files.mjs",
+      "always": true,
+      "requires": ["bin:node"]
+    },
+    {
+      "name": "download-archive",
+      "run": "node .claude/skills/download-archive-check/check-download-archive.mjs",
+      "always": true,
+      "requires": ["bin:node", "bin:git"]
+    },
+    {
+      "name": "pest",
+      "run": "vendor/bin/pest",
+      "paths": ["**/*.php", "!vendor/**", "phpunit.xml*", "composer.lock"]
+    }
+  ]
+}

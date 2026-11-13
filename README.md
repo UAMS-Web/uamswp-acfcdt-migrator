@@ -123,6 +123,21 @@ Sandbox (separate DB, not your Local site): WP 7.0.6 subdirectory multisite, ACF
 - **Roll back** restored the outdated pre-migration postmeta exactly
 - all downloads (changes, backups, snapshot, table archive, orphan CSV) worked
 
+## Running the tests
+
+The unit suite uses Pest 5 with Brain Monkey, so it needs no database and no WordPress checkout. It runs on PHP 8.4 (`config.platform.php` in `composer.json`).
+
+```bash
+composer install
+composer test
+```
+
+Before a pull request, run the shared local CI runner, which includes the suite:
+
+```bash
+node .claude/skills/local-ci/local-ci.mjs > ci.log 2>&1
+```
+
 ## Credits
 
 Developed and maintained by UAMS Web Services.
