@@ -122,3 +122,12 @@ Sandbox (separate DB, not your Local site): WP 7.0.6 subdirectory multisite, ACF
 - interrupted backfill → **Resume** finished from the saved batch
 - **Roll back** restored the outdated pre-migration postmeta exactly
 - all downloads (changes, backups, snapshot, table archive, orphan CSV) worked
+
+## Credits
+
+Developed and maintained by UAMS Web Services.
+
+Developers:
+
+- Josh Daugherty
+- Todd
