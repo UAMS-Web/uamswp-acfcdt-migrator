@@ -3,7 +3,8 @@
  * Plugin Name: UAMSWP ACF Custom Database Tables Migrator
  * Description: Moves ACF values out of ACF Custom Database Tables into core postmeta with snapshot, verify and rollback. Use it from Tools → ACFCDT Migration (no WP-CLI needed) or via WP-CLI. Does nothing on the front end.
  * Version: 0.2.2
- * Author: UAMS Web
+ * Author: UAMS Web Services
+ * Author URI: https://communications.uams.edu/web/
  * Network: true
  * Requires PHP: 7.4
  */
