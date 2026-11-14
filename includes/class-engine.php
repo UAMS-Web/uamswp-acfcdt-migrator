@@ -29,6 +29,8 @@ class Engine
     public static function clean_ref($ref): string
     {
         $ref = (string) $ref;
+        // An empty name fails the pattern as well, so the comparison only makes the intent explicit.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         if ($ref === '' || ! preg_match('/^[A-Za-z0-9_.-]{1,60}$/', $ref)) {
             throw new \InvalidArgumentException("Names may only contain letters, numbers, dot, dash and underscore (max 60): '$ref'");
         }
@@ -52,6 +54,8 @@ class Engine
             return 0;
         }
 
+        // The first index array_fill() numbers from is discarded by implode().
+        // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($types), '%s'));
 
         return (int) $wpdb->get_var($wpdb->prepare(
@@ -69,6 +73,8 @@ class Engine
             return [];
         }
 
+        // The first index array_fill() numbers from is discarded by implode().
+        // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($types), '%s'));
         $sql = $wpdb->prepare(
             "SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
