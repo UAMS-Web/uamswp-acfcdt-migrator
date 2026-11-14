@@ -108,7 +108,11 @@ function eng_inv_flat(string $sql): string
     return trim((string) preg_replace('/\s+/', ' ', $sql));
 }
 
-/** The statements executed, as `[method, flattened sql]` pairs. */
+/**
+ * The statements executed, as `[method, flattened sql]` pairs.
+ *
+ * @return list<list<string>>
+ */
 function eng_inv_log(): array
 {
     return array_map(fn (array $e): array => [$e[0], eng_inv_flat($e[1])], $GLOBALS['eng_inv_executed']);
@@ -343,6 +347,7 @@ it('limits to at least one row', function (mixed $limit, string $expected): void
  * A table definition as `Site::table_defs()` returns it.
  *
  * @param  list<array{name: string, identifier: string}>  $columns
+ * @return array<string, mixed>
  */
 function eng_inv_def(string $name, string $post_type, array $columns = [], string $file = '/json/x.json'): array
 {

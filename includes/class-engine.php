@@ -26,6 +26,9 @@ class Engine
         return function_exists('acf_get_value') && function_exists('acf_get_field_groups');
     }
 
+    /**
+     * @param  int|string  $ref
+     */
     public static function clean_ref($ref): string
     {
         $ref = (string) $ref;
@@ -40,12 +43,19 @@ class Engine
 
     /* ================================================================== posts */
 
+    /**
+     * @param  array<int, int|string>|null  $ids  Restrict to these post IDs.
+     */
     public function total_posts($ids = null): int
     {
         return count($this->site->posts($this->site->post_types(), $ids));
     }
 
-    /** How many posts are at or below a cursor (for progress after a resume). */
+    /**
+     * How many posts are at or below a cursor (for progress after a resume).
+     *
+     * @param  int|string  $cursor
+     */
     public function posts_upto($cursor): int
     {
         global $wpdb;
@@ -64,7 +74,14 @@ class Engine
         ));
     }
 
-    /** Posts with ID > $cursor, ascending. */
+    /**
+     * Posts with ID > $cursor, ascending.
+     *
+     * @param  int|string  $cursor
+     * @param  int|string  $limit
+     * @param  array<int, int|string>|null  $ids
+     * @return array<int, \stdClass>|null
+     */
     private function next_posts($cursor, $limit, $ids = null)
     {
         global $wpdb;
@@ -90,6 +107,9 @@ class Engine
 
     /* ================================================================== inventory */
 
+    /**
+     * @return array<string, mixed>
+     */
     public function inventory(): array
     {
         global $wpdb;
@@ -175,6 +195,7 @@ class Engine
     /**
      * DB columns whose identifier has no ACF field, or that aren't in the JSON at all.
      *
+     * @param  array<string, mixed>  $def  A table definition, as `Site::table_defs()` returns it.
      * @return mixed[]
      */
     public function orphan_columns(array $def): array
@@ -200,6 +221,7 @@ class Engine
     /**
      * Stream every raw row of a custom table to a callback (archive). Read-only.
      *
+     * @param  string  $table_name
      * @param  callable  $emit  function( array $row )
      * @return int rows
      */
@@ -229,6 +251,11 @@ class Engine
 
     /* ================================================================== snapshot */
 
+    /**
+     * @param  int|string  $label
+     * @param  string  $mode  One of `SNAPSHOT_MODES`.
+     * @param  bool  $overwrite  Replace an existing snapshot with the same label.
+     */
     public function snapshot_start($label, $mode, $overwrite = false): string
     {
         $label = self::clean_ref($label);
@@ -258,7 +285,13 @@ class Engine
         return $label;
     }
 
-    /** @return array {processed, cursor, done, values} */
+    /**
+     * @param  int|string  $label
+     * @param  int|string  $cursor  Last post ID already handled.
+     * @param  int  $limit
+     * @param  array<int, int|string>|null  $ids
+     * @return array{processed: int, cursor: int|string, done: bool, values: int}
+     */
     public function snapshot_batch($label, $cursor, $limit = 25, $ids = null): array
     {
         $info = Store::get('snapinfo', $label);
@@ -313,7 +346,10 @@ class Engine
     /* ================================================================== compare */
 
     /**
-     * @return array {summary, diffs[]}
+     * @param  int|string  $a
+     * @param  int|string  $b
+     * @param  array<int, int|string>  $ignore  Field names to leave out of the comparison; only an exact match counts.
+     * @return array{summary: array<string, int|bool>, diffs: list<array<string, mixed>>}
      */
     public function compare($a, $b, array $ignore = []): array
     {
@@ -378,6 +414,12 @@ class Engine
 
     /* ================================================================== backfill */
 
+    /**
+     * @param  bool|int|string  $dry  Read as a boolean.
+     * @param  bool|int|string  $no_clear  Read as a boolean.
+     * @param  int|string|null  $stamp  The run name; one is generated when empty.
+     * @param  bool  $allow_stale_cache
+     */
     public function backfill_start($dry, $no_clear, $stamp = null, $allow_stale_cache = false): string
     {
         $guard = new HookGuard;
@@ -407,7 +449,13 @@ class Engine
         return $stamp;
     }
 
-    /** @return array {processed, cursor, done, written, mismatches, warnings[]} */
+    /**
+     * @param  int|string  $stamp
+     * @param  int|string  $cursor  Last post ID already handled.
+     * @param  int  $limit
+     * @param  array<int, int|string>|null  $ids
+     * @return array{processed: int, cursor: int|string, done: bool, written: int, mismatches: int, warnings: list<string>}
+     */
     public function backfill_batch($stamp, $cursor, $limit = 10, $ids = null): array
     {
         $run = Store::get('run', $stamp);
@@ -581,6 +629,10 @@ class Engine
 
     /* ================================================================== rollback */
 
+    /**
+     * @param  int|string  $stamp
+     * @param  bool  $force  Roll back again even if already rolled back.
+     */
     public function rollback_start($stamp, $force = false): string
     {
         $stamp = self::clean_ref($stamp);
@@ -612,6 +664,11 @@ class Engine
     /**
      * Restores postmeta from backups, newest first (so overlapping key patterns such as
      * location_phone / location_phone_numbers unwind correctly). Cursor is the backup row id.
+     *
+     * @param  int|string  $stamp
+     * @param  int|string  $cursor
+     * @param  int  $limit
+     * @return array{processed: int, cursor: int|string, done: bool}
      */
     public function rollback_batch($stamp, $cursor, $limit = 100): array
     {

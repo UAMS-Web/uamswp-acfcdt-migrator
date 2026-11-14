@@ -89,13 +89,21 @@ function store_wpdb(array $returns = []): MockInterface
     return $wpdb;
 }
 
-/** The first prepared query and its arguments. */
+/**
+ * The first prepared query and its arguments.
+ *
+ * @return array<int, mixed>
+ */
 function store_prepared(int $index = 0): array
 {
     return $GLOBALS['store_prepared'][$index];
 }
 
-/** A row object as `$wpdb->get_results()` returns it. */
+/**
+ * A row object as `$wpdb->get_results()` returns it.
+ *
+ * @param  array<string, mixed>  $fields
+ */
 function store_row(array $fields): object
 {
     return (object) $fields;
@@ -538,7 +546,11 @@ it('returns an empty array when there are no headers', function (): void {
 
 // change_summary()
 
-/** A change row's JSON. */
+/**
+ * A change row's JSON.
+ *
+ * @param  array<string, mixed>  $flags
+ */
 function store_change(string $category, string $type, string $field, int $post, array $flags = []): string
 {
     return json_encode(['category' => $category, 'post_type' => $type, 'field' => $field, 'post_id' => $post] + $flags);

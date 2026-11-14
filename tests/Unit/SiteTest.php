@@ -106,6 +106,7 @@ function site_dir(array $files = []): string
  * A table definition file's contents.
  *
  * @param  list<array<string, mixed>>  $columns
+ * @param  array<string, mixed>  $over
  */
 function site_def(string $name, string $post_type, array $columns = [], array $over = []): string
 {
@@ -116,7 +117,11 @@ function site_def(string $name, string $post_type, array $columns = [], array $o
     ], JSON_THROW_ON_ERROR);
 }
 
-/** A `$wpdb` that knows which tables exist and records each prepared query. */
+/**
+ * A `$wpdb` that knows which tables exist and records each prepared query.
+ *
+ * @param  list<string>  $existing
+ */
 function site_wpdb(array $existing = []): MockInterface
 {
     $GLOBALS['site_tables'] = $existing;
@@ -495,7 +500,12 @@ it('finds no posts for no post types, without asking the database', function ():
         ->and($GLOBALS['site_prepared'])->toBe([]);
 });
 
-/** The query `Site::posts()` runs, and what it prepared it from. */
+/**
+ * The query `Site::posts()` runs, and what it prepared it from.
+ *
+ * @param  list<string>  $types
+ * @return array{0: array<int, stdClass>|null, 1: array<string>, 2: mixed}
+ */
 function site_posts(array $types, mixed $ids = null, mixed $limit = 0): array
 {
     $wpdb = site_wpdb();

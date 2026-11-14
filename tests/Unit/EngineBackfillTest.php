@@ -42,7 +42,11 @@ afterEach(function (): void {
     unset($GLOBALS['wpdb']);
 });
 
-/** The stand-in field map the batch tests use: one text field. */
+/**
+ * The stand-in field map the batch tests use: one text field.
+ *
+ * @return array<string, string>
+ */
 function eng_bf_field(string $name = 'name', string $type = 'text'): array
 {
     return ['name' => $name, 'key' => 'k_'.$name, 'type' => $type];
@@ -57,6 +61,7 @@ function eng_bf_field(string $name = 'name', string $type = 'text'): array
  * (post id to field key to the value read while attached or detached), `write_ignored` (a write that does not take).
  *
  * @param  array<string, mixed>  $o
+ * @return ArrayObject<string, mixed>
  */
 function eng_bf_wire(array $o = []): ArrayObject
 {
@@ -175,19 +180,34 @@ function eng_bf_post(int $id, string $type = 'doctor', string $title = 'Title', 
     return (object) ['ID' => (string) $id, 'post_type' => $type, 'post_status' => 'publish', 'post_title' => $title, 'post_modified' => $modified];
 }
 
-/** The logged calls with the given names, one row per call. */
+/**
+ * The logged calls with the given names, one row per call.
+ *
+ * @param  ArrayObject<string, mixed>  $st
+ * @return list<array<int, mixed>>
+ */
 function eng_bf_calls(ArrayObject $st, string ...$names): array
 {
     return array_values(array_filter($st['log'], fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
-/** The names of every logged call, in order. */
+/**
+ * The names of every logged call, in order.
+ *
+ * @param  ArrayObject<string, mixed>  $st
+ * @return list<string>
+ */
 function eng_bf_order(ArrayObject $st): array
 {
     return array_map(fn (array $row): string => $row[0], $st['log']);
 }
 
-/** The data of every `Store::put()` of one kind, as `[ref, post_id, field, data, mode?]` rows. */
+/**
+ * The data of every `Store::put()` of one kind, as `[ref, post_id, field, data, mode?]` rows.
+ *
+ * @param  ArrayObject<string, mixed>  $st
+ * @return list<array<int, mixed>>
+ */
 function eng_bf_puts(ArrayObject $st, string $kind): array
 {
     $out = [];
@@ -206,7 +226,12 @@ function eng_bf_dash(): string
     return "\u{2014}";
 }
 
-/** A run record for `Store::get('run', ...)`. */
+/**
+ * A run record for `Store::get('run', ...)`.
+ *
+ * @param  array<string, mixed>  $run
+ * @return array<string, array<string, array<string, mixed>>>
+ */
 function eng_bf_run(array $run = []): array
 {
     return ['get' => ['run|r1' => $run + ['dry' => false, 'no_clear' => false]]];
@@ -217,7 +242,8 @@ function eng_bf_run(array $run = []): array
  *
  * @param  list<object>  $posts
  * @param  array<string, mixed>  $o  `eng_bf_wire()` options
- * @return array{0: array<string, mixed>, 1: ArrayObject}
+ * @param  array<string, mixed>  $run
+ * @return array{0: array<string, mixed>, 1: ArrayObject<string, mixed>}
  */
 function eng_bf_batch(array $posts, array $o = [], mixed $cursor = 0, int $limit = 10, mixed $ids = null, array $run = []): array
 {

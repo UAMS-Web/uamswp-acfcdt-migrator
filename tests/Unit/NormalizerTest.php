@@ -304,8 +304,11 @@ it('keeps the position of an empty item in a list', function (): void {
 });
 
 it('drops empty entries from an associative array and sorts it by key', function (): void {
+    /** @var array<string, string> $sorted */
+    $sorted = Normalizer::generic(['b' => 1, 'a' => 2]);
+
     expect(Normalizer::generic(['b' => 1, 'a' => 2, 'c' => '', 'd' => null, 'e' => false]))->toBe(['a' => '2', 'b' => '1'])
-        ->and(array_keys(Normalizer::generic(['b' => 1, 'a' => 2])))->toBe(['a', 'b']);
+        ->and(array_keys($sorted))->toBe(['a', 'b']);
 });
 
 it('reads an associative array of only empty entries as empty', function (): void {

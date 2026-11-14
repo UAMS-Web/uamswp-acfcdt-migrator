@@ -7,20 +7,29 @@ namespace UAMSWP_ACFCDT_Migrator;
 /**
  * Everything specific to the current site (blog): table definitions, which tables exist,
  * which posts to process, which ACF fields apply to a post, and where output files go.
+ *
+ * @phpstan-type TableDef array{name: string, post_type: string, file: string, columns: list<array{name: string, identifier: string}>}
  */
 class Site
 {
     /** Field types that never hold a value. */
     const SKIP_TYPES = ['tab', 'message', 'accordion'];
 
+    /** @var int */
     public $blog_id;
 
+    /** @var string */
     public $url;
 
+    /** @var array<string, TableDef>|null */
     private ?array $defs = null;
 
+    /** @var array<string, array<string, array<string, mixed>>> */
     private array $field_cache = [];
 
+    /**
+     * @param  string|null  $json_dir_override  Table JSON directory to use instead of the detected one.
+     */
     public function __construct(private $json_dir_override = null)
     {
         $this->blog_id = get_current_blog_id();
@@ -29,6 +38,9 @@ class Site
 
     /* ------------------------------------------------------------------ table definitions */
 
+    /**
+     * @return string
+     */
     public function json_dir()
     {
         if ($this->json_dir_override) {
@@ -49,7 +61,7 @@ class Site
     /**
      * Parsed table_*.json definitions for post-type tables.
      *
-     * @return array name => [name, post_type, file, columns => [[name, identifier]]]
+     * @return array<string, TableDef>
      */
     public function table_defs(): array
     {
@@ -88,6 +100,9 @@ class Site
         return $this->defs;
     }
 
+    /**
+     * @param  string  $table
+     */
     public function prefixed($table): string
     {
         global $wpdb;
@@ -95,6 +110,9 @@ class Site
         return $wpdb->prefix.$table;
     }
 
+    /**
+     * @param  string  $table
+     */
     public function table_exists($table): bool
     {
         global $wpdb;
@@ -103,7 +121,11 @@ class Site
         return $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($full))) === $full;
     }
 
-    /** Table defs whose table actually exists on this site. */
+    /**
+     * Table defs whose table actually exists on this site.
+     *
+     * @return array<string, TableDef>
+     */
     public function active_defs(): array
     {
         return array_filter($this->table_defs(), fn (array $def): bool => $this->table_exists($def['name']));
@@ -118,7 +140,8 @@ class Site
      * serving postmeta, even though the table exists and holds data. Columns missing from the cache are likewise
      * served from postmeta.
      *
-     * @return array table name => [cache_post_type, intercepting, not_cached[]]; [] if there is no cache file.
+     * @return array<string, mixed> table name => [cache_post_type, intercepting, not_cached[]]; a lone `_missing` key
+     *                              holding the cache path if there is no cache file.
      */
     public function cache_status(): array
     {
@@ -178,9 +201,12 @@ class Site
         return $problems;
     }
 
+    /**
+     * @return list<string>
+     */
     public function post_types(): array
     {
-        return array_values(array_unique(array_map(fn (array $d) => $d['post_type'], $this->active_defs())));
+        return array_values(array_unique(array_map(fn (array $d): string => $d['post_type'], $this->active_defs())));
     }
 
     /* ------------------------------------------------------------------ posts & fields */
@@ -188,7 +214,10 @@ class Site
     /**
      * Every post of the given types except auto-drafts and revisions (trash and drafts included on purpose).
      *
-     * @return object[] {ID, post_type, post_status, post_title}
+     * @param  list<string>  $types
+     * @param  int|string|list<int|string>|null  $ids  Restrict to these post IDs.
+     * @param  int|string  $limit  `0` for no limit.
+     * @return array<int, \stdClass>|null {ID, post_type, post_status, post_title, post_modified}
      */
     public function posts(array $types, $ids = null, $limit = 0)
     {
@@ -220,6 +249,10 @@ class Site
 
     /**
      * Top-level ACF fields that apply to a post, keyed by field name.
+     *
+     * @param  int|string  $post_id
+     * @param  string  $post_type
+     * @return array<string, array<string, mixed>>
      */
     public function fields_for_post($post_id, $post_type)
     {
@@ -260,6 +293,11 @@ class Site
 
     /**
      * Raw postmeta rows that belong to a field (value + _key reference, and sub-field rows for complex fields).
+     *
+     * @param  int|string  $post_id
+     * @param  string  $name
+     * @param  bool  $complex
+     * @return array<int, array<int, string|null>>|null Rows of [meta_key, meta_value].
      */
     public function meta_rows_for_field($post_id, $name, $complex)
     {
@@ -275,6 +313,12 @@ class Site
         );
     }
 
+    /**
+     * @param  int|string  $post_id
+     * @param  string  $name
+     * @param  bool  $complex
+     * @return int|bool Rows deleted, or `false` when the query failed.
+     */
     public function delete_meta_rows_for_field($post_id, $name, $complex)
     {
         global $wpdb;
@@ -288,7 +332,11 @@ class Site
         );
     }
 
-    /** @return array [sql fragment with placeholders, params] */
+    /**
+     * @param  string  $name
+     * @param  bool  $complex
+     * @return array{0: string, 1: list<string>} [sql fragment with placeholders, params]
+     */
     private function meta_where($name, $complex): array
     {
         global $wpdb;
@@ -309,6 +357,9 @@ class Site
     /**
      * Base output dir. Defaults to one level ABOVE the web root so snapshots/backups are not web-accessible;
      * falls back to wp-content if that isn't writable. Override with --dir or ACFCDT_MIGRATION_DIR.
+     *
+     * @param  string|null  $override
+     * @param  string  $sub
      */
     public static function out_dir($override = null, $sub = ''): string
     {
