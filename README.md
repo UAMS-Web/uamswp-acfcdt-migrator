@@ -146,3 +146,19 @@ Developers:
 
 - Josh Daugherty
 - Todd McKee
+
+## Code quality
+
+The code is checked with Rector, PHPStan (with the WordPress, WP-CLI and ACF Pro stubs) and Pint with the `laravel` preset, all development dependencies. PHPStan runs at level 0, the highest level the code passes today, and rises one level per change.
+
+```bash
+composer test:pint
+composer test:refactor
+composer stan
+```
+
+`composer pint` and `composer refactor` apply what the first two report. Tell `git blame` to skip the formatting commit, once per clone:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```

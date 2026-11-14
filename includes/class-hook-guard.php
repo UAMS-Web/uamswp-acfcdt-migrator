@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace UAMSWP_ACFCDT_Migrator;
 
 /**
@@ -12,112 +14,129 @@ namespace UAMSWP_ACFCDT_Migrator;
  * Works by finding every callback registered on any hook whose object lives in the
  * ACFCustomDatabaseTables\ namespace, and removing / re-adding them.
  */
-class HookGuard {
+class HookGuard
+{
+    const PLUGIN_NS = 'ACFCustomDatabaseTables\\';
 
-	const PLUGIN_NS = 'ACFCustomDatabaseTables\\';
+    /** @var array[] [hook, callable, priority, accepted_args] */
+    private array $callbacks = [];
 
-	/** @var array[] [hook, callable, priority, accepted_args] */
-	private $callbacks = [];
+    /** @var object[] ACFGetFieldIntercept instances (have per-request caches we need to clear). */
+    private array $get_intercepts = [];
 
-	/** @var object[] ACFGetFieldIntercept instances (have per-request caches we need to clear). */
-	private $get_intercepts = [];
+    private bool $detached = false;
 
-	private $detached = false;
+    public function __construct()
+    {
+        $this->collect();
+    }
 
-	public function __construct() {
-		$this->collect();
-	}
+    private function collect(): void
+    {
+        global $wp_filter;
 
-	private function collect() {
-		global $wp_filter;
+        foreach ($wp_filter as $hook => $wp_hook) {
+            if (! ($wp_hook instanceof \WP_Hook)) {
+                continue;
+            }
 
-		foreach ( $wp_filter as $hook => $wp_hook ) {
-			if ( ! ( $wp_hook instanceof \WP_Hook ) ) {
-				continue;
-			}
-			foreach ( $wp_hook->callbacks as $priority => $cbs ) {
-				foreach ( $cbs as $cb ) {
-					$fn = $cb['function'];
-					if ( ! is_array( $fn ) || ! is_object( $fn[0] ) ) {
-						continue;
-					}
-					$class = get_class( $fn[0] );
-					if ( strpos( $class, self::PLUGIN_NS ) !== 0 ) {
-						continue;
-					}
-					$this->callbacks[] = [ $hook, $fn, $priority, $cb['accepted_args'] ];
+            foreach ($wp_hook->callbacks as $priority => $cbs) {
+                foreach ($cbs as $cb) {
+                    $fn = $cb['function'];
+                    if (! is_array($fn) || ! is_object($fn[0])) {
+                        continue;
+                    }
 
-					if ( substr( $class, - strlen( 'ACFGetFieldIntercept' ) ) === 'ACFGetFieldIntercept' && method_exists( $fn[0], 'reset' ) ) {
-						$this->get_intercepts[ spl_object_hash( $fn[0] ) ] = $fn[0];
-					}
-				}
-			}
-		}
-	}
+                    $class = $fn[0]::class;
+                    if (! str_starts_with($class, self::PLUGIN_NS)) {
+                        continue;
+                    }
 
-	public static function plugin_loaded() {
-		return function_exists( 'acf_custom_database_tables' ) || class_exists( 'ACFCustomDatabaseTables\\Core', false );
-	}
+                    $this->callbacks[] = [$hook, $fn, $priority, $cb['accepted_args']];
 
-	public function has_intercepts() {
-		return ! empty( $this->callbacks );
-	}
+                    if (str_ends_with($class, 'ACFGetFieldIntercept') && method_exists($fn[0], 'reset')) {
+                        $this->get_intercepts[spl_object_hash($fn[0])] = $fn[0];
+                    }
+                }
+            }
+        }
+    }
 
-	public function hook_names() {
-		return array_values( array_unique( array_map( function ( $c ) {
-			return $c[0];
-		}, $this->callbacks ) ) );
-	}
+    public static function plugin_loaded(): bool
+    {
+        return function_exists('acf_custom_database_tables') || class_exists('ACFCustomDatabaseTables\\Core', false);
+    }
 
-	public function callback_count() {
-		return count( $this->callbacks );
-	}
+    public function has_intercepts(): bool
+    {
+        return $this->callbacks !== [];
+    }
 
-	public function is_detached() {
-		return $this->detached;
-	}
+    public function hook_names(): array
+    {
+        return array_values(array_unique(array_map(fn (array $c) => $c[0], $this->callbacks)));
+    }
 
-	/** Switch to meta mode. */
-	public function detach() {
-		if ( $this->detached ) {
-			return;
-		}
-		foreach ( $this->callbacks as $c ) {
-			remove_filter( $c[0], $c[1], $c[2] );
-		}
-		$this->detached = true;
-		$this->reset_caches();
-	}
+    public function callback_count(): int
+    {
+        return count($this->callbacks);
+    }
 
-	/** Switch back to effective mode. */
-	public function attach() {
-		if ( ! $this->detached ) {
-			return;
-		}
-		foreach ( $this->callbacks as $c ) {
-			add_filter( $c[0], $c[1], $c[2], $c[3] );
-		}
-		$this->detached = false;
-		$this->reset_caches();
-	}
+    public function is_detached(): bool
+    {
+        return $this->detached;
+    }
 
-	/**
-	 * Clears ACF's value store and the plugin's in-memory "already handled" bookkeeping so the next read
-	 * really goes to the source for the current mode. Call between posts and on every mode switch.
-	 */
-	public function reset_caches() {
-		foreach ( $this->get_intercepts as $intercept ) {
-			$intercept->reset();
-		}
-		self::flush_acf_values();
-	}
+    /** Switch to meta mode. */
+    public function detach(): void
+    {
+        if ($this->detached) {
+            return;
+        }
 
-	public static function flush_acf_values() {
-		if ( function_exists( 'acf_get_store' ) ) {
-			$store = acf_get_store( 'values' );
-			if ( $store ) {
-				$store->reset();
-			}
-		}
-	}
+        foreach ($this->callbacks as $c) {
+            remove_filter($c[0], $c[1], $c[2]);
+        }
+
+        $this->detached = true;
+        $this->reset_caches();
+    }
+
+    /** Switch back to effective mode. */
+    public function attach(): void
+    {
+        if (! $this->detached) {
+            return;
+        }
+
+        foreach ($this->callbacks as $c) {
+            add_filter($c[0], $c[1], $c[2], $c[3]);
+        }
+
+        $this->detached = false;
+        $this->reset_caches();
+    }
+
+    /**
+     * Clears ACF's value store and the plugin's in-memory "already handled" bookkeeping so the next read
+     * really goes to the source for the current mode. Call between posts and on every mode switch.
+     */
+    public function reset_caches(): void
+    {
+        foreach ($this->get_intercepts as $intercept) {
+            $intercept->reset();
+        }
+
+        self::flush_acf_values();
+    }
+
+    public static function flush_acf_values(): void
+    {
+        if (function_exists('acf_get_store')) {
+            $store = acf_get_store('values');
+            if ($store) {
+                $store->reset();
+            }
+        }
+    }
 }
