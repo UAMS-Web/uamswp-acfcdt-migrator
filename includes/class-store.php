@@ -224,6 +224,7 @@ class Store
         }
 
         $stats['posts'] = count($posts);
+        /** @var array<string, array<string, int|string>> $by */
         ksort($by);
 
         return ['stats' => $stats, 'by_field' => array_values($by)];

@@ -55,6 +55,7 @@ beforeEach(function (): void {
     $GLOBALS['adm_admin_nonce_calls'] = [];
     $GLOBALS['adm_blog'] = 0;
     $GLOBALS['adm_blog_log'] = [];
+    $GLOBALS['adm_blog_types'] = [];
     $_POST = [];
     $_GET = [];
 
@@ -127,7 +128,9 @@ beforeEach(function (): void {
 
         return $out;
     });
-    when('switch_to_blog')->alias(function (int $id): bool {
+    when('switch_to_blog')->alias(function (mixed $id): bool {
+        // The type is recorded because a typed parameter would coerce a numeric string without a word.
+        $GLOBALS['adm_blog_types'][] = get_debug_type($id);
         $GLOBALS['adm_blog'] = $id;
         $GLOBALS['adm_blog_log'][] = "switch $id";
 
@@ -412,6 +415,17 @@ it('lists a site that has tables with its snapshots and latest real backfill', f
         ->and($html)->not->toContain('No site has')
         ->and($html)->not->toContain('a.test')
         ->and($GLOBALS['adm_blog_log'])->toBe(['switch 2', 'restore', 'switch 5', 'install', 'restore']);
+});
+
+it('switches to each site by integer ID when the site object holds it as a string', function (): void {
+    adm_network(
+        [(object) ['blog_id' => '5', 'domain' => 'b.test', 'path' => '/']],
+        [5 => ['provider']],
+        [5 => ['run' => ['run-x' => ['stats' => ['write_mismatch' => 0]]]]],
+    );
+
+    expect($GLOBALS['adm_blog_log'])->toBe(['switch 5', 'install', 'restore'])
+        ->and($GLOBALS['adm_blog_types'])->toBe(['int']);
 });
 
 it('shows a dash when a site has no snapshots and no real run', function (): void {
