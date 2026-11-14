@@ -36,7 +36,8 @@
         "test:pint": "pint --test",
         "test:refactor": "rector --dry-run",
         "test:refactor:sweep": "rector --dry-run --clear-cache --config=rector-sweep.php",
-        "test:unit": "pest"
+        "test:unit": "pest",
+        "mutate": "pest --mutate --path=includes --covered-only"
     },
     "scripts-descriptions": {
         "pint": "Format the PHP files with Pint.",
@@ -48,6 +49,7 @@
         "test:pint": "Check formatting with Pint without changing files.",
         "test:refactor": "Preview Rector's gating profile.",
         "test:refactor:sweep": "Preview Rector's sweep profile.",
-        "test:unit": "Run the Pest suite that needs no WordPress and no database."
+        "test:unit": "Run the Pest suite that needs no WordPress and no database.",
+        "mutate": "Run the mutation pass over includes, covered code only."
     }
 }
