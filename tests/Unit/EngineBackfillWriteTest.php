@@ -51,6 +51,7 @@ beforeEach(function (): void {
         'throw' => false,
     ]);
 
+    /** @var ArrayObject<string, mixed> $state */
     $state = $GLOBALS['eng_bw_state'];
 
     redefine(Store::class.'::install', fn (): null => null);

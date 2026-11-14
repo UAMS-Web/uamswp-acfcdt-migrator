@@ -43,7 +43,8 @@ class Normalizer
         }
 
         if (is_object($v)) {
-            $v = json_decode(wp_json_encode($v), true);
+            // An object that cannot be encoded decodes to `null`.
+            $v = json_decode((string) wp_json_encode($v), true);
         }
 
         // ID fields: ID 0 / '' never refers to anything (ACF drops it on save) and array keys carry no
@@ -182,7 +183,8 @@ class Normalizer
         }
 
         if (is_object($v)) {
-            $v = json_decode(wp_json_encode($v), true);
+            // An object that cannot be encoded decodes to `null`.
+            $v = json_decode((string) wp_json_encode($v), true);
         }
 
         if (! is_array($v)) {

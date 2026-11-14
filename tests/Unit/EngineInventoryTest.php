@@ -111,11 +111,11 @@ function eng_inv_flat(string $sql): string
 /**
  * The statements executed, as `[method, flattened sql]` pairs.
  *
- * @return list<list<string>>
+ * @return list<array{mixed, string}>
  */
 function eng_inv_log(): array
 {
-    return array_map(fn (array $e): array => [$e[0], eng_inv_flat($e[1])], $GLOBALS['eng_inv_executed']);
+    return array_values(array_map(fn (array $e): array => [$e[0], eng_inv_flat($e[1])], $GLOBALS['eng_inv_executed']));
 }
 
 /**

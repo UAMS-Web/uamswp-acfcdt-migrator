@@ -111,6 +111,10 @@ it('reads an ID field with only zero or empty IDs as empty', function (mixed $ra
     'zeros' => [[0, '0', '']],
 ]);
 
+it('reads an object that cannot be encoded as nothing in an ID field', function (): void {
+    expect(Normalizer::value(['type' => 'user'], (object) ['bad' => "\xB1"]))->toBeNull();
+});
+
 it('reads an object in an ID field through its array form', function (): void {
     expect(Normalizer::value(['type' => 'user'], (object) ['ID' => 4]))->toBe(['4']);
 });
@@ -323,6 +327,10 @@ it('treats an array whose keys are not 0..n as associative', function (array $ra
     'reversed is sorted by key' => [[1 => 'b', 0 => 'a'], [0 => 'a', 1 => 'b']],
     'is a list' => [[0 => 'a', 1 => 'b'], ['a', 'b']],
 ]);
+
+it('reads an object that cannot be encoded as an empty string in a generic value', function (): void {
+    expect(Normalizer::generic((object) ['bad' => "\xB1"]))->toBe('');
+});
 
 it('reads an object in a generic value through its array form', function (): void {
     expect(Normalizer::generic((object) ['k' => 3]))->toBe(['k' => '3']);
