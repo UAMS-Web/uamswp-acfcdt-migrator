@@ -11,4 +11,5 @@
 .idea/
 /vendor/
 /tests/Integration/vendor/
+/tests/Integration/.phpunit.result.cache
 /.phpstan/
