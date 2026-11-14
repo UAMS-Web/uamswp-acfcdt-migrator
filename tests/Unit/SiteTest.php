@@ -120,6 +120,7 @@ function site_def(string $name, string $post_type, array $columns = [], array $o
 function site_wpdb(array $existing = []): MockInterface
 {
     $GLOBALS['site_tables'] = $existing;
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->prefix = 'wp_';
     $wpdb->posts = 'wp_posts';

@@ -27,6 +27,7 @@
 
 declare(strict_types=1);
 
+use Mockery\MockInterface;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\HookGuard;
 use UAMSWP_ACFCDT_Migrator\Site;
@@ -164,6 +165,7 @@ function eng_bw_run(array $meta, array $field = ['name' => 'physician_expertise'
 
     redefine(Site::class.'::fields_for_post', fn ($id, $type): array => [$field['name'] => $field]);
 
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
     $wpdb->shouldReceive('prepare')->andReturnUsing(fn (string $q, ...$args): string => $q);

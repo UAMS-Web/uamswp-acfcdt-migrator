@@ -321,7 +321,8 @@ it('turns a refused snapshot into a CLI error', function (): void {
 });
 
 /**
- * @param  array<string, mixed>  $result
+ * @param  list<array<string, mixed>>  $diffs
+ * @param  array<string, mixed>  $summary
  * @return array<string, mixed>
  */
 function cmd_compare_result(array $diffs = [], array $summary = []): array
@@ -442,7 +443,8 @@ it('turns a refused compare into a CLI error', function (): void {
 });
 
 /**
- * @param  array<string, mixed>  $summary
+ * @param  array<string, mixed>  $stats
+ * @param  list<array<string, mixed>>  $by_field
  * @return array<string, mixed>
  */
 function cmd_summary(array $stats = [], array $by_field = []): array
