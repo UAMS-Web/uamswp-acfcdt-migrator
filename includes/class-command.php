@@ -258,6 +258,8 @@ class Command
             $label = $engine->snapshot_start($args[0], get_flag_value($assoc, 'mode', 'effective'), (bool) get_flag_value($assoc, 'force'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
+
+            return;
         }
 
         $ids = $this->ids($assoc);
@@ -317,6 +319,8 @@ class Command
             $res = $engine->compare($args[0], $args[1], $ignore);
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
+
+            return;
         }
 
         foreach (array_slice($res['diffs'], 0, (int) get_flag_value($assoc, 'limit', 25)) as $d) {
@@ -381,6 +385,8 @@ class Command
             $stamp = $engine->backfill_start($dry, (bool) get_flag_value($assoc, 'no-clear'), $assoc['stamp'], (bool) get_flag_value($assoc, 'allow-stale-cache'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
+
+            return;
         }
 
         $ids = $this->ids($assoc);
@@ -453,6 +459,8 @@ class Command
             $stamp = $engine->rollback_start($args[0], (bool) get_flag_value($assoc, 'force'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
+
+            return;
         }
 
         $cursor = 0;
