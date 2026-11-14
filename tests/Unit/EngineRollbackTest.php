@@ -41,6 +41,7 @@ afterEach(function (): void {
  */
 function eng_rb_wire(array $o = []): ArrayObject
 {
+    /** @var ArrayObject<string, list<mixed>> $st */
     $st = new ArrayObject(['log' => []]);
     $note = function (string $name, array $args = []) use ($st): void {
         $log = $st['log'];
