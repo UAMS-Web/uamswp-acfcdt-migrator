@@ -703,6 +703,15 @@ it('compares two snapshots, ignoring the fields listed, and adds the download li
         ->and($args->getArrayCopy())->toBe([['before', 'after', [0 => 'x', 1 => 'y', 3 => 'z']]]);
 });
 
+it('shows a value that cannot be encoded as JSON in a comparison as such', function (): void {
+    adm_compare([['post_id' => 1, 'field' => 'f', 'a' => ['k' => "\xB1"], 'b' => 'x']], new ArrayObject);
+
+    $sent = adm_ajax(['op' => 'compare', 'a' => 'before', 'b' => 'after']);
+
+    expect($sent->success)->toBeTrue()
+        ->and($sent->data['diffs'])->toBe([['post_id' => 1, 'field' => 'f', 'a' => '(unencodable)', 'b' => 'x']]);
+});
+
 it('compares with nothing ignored when no list is given', function (): void {
     $args = new ArrayObject;
     adm_compare([], $args);
@@ -990,6 +999,14 @@ it('streams only the rows with something in an orphaned column, as CSV', functio
             'X-Content-Type-Options: nosniff',
         ])
         ->and(CommandTestProcess::$calls)->toBe([['fclose']]);
+});
+
+it('stops an orphaned-columns download whose output stream cannot be opened', function (): void {
+    adm_defs(['provider' => ['name' => 'provider']]);
+    adm_engine(['orphan_columns' => fn (array $d): array => ['old_a']]);
+    CommandTestProcess::$failOpen = 'php://output';
+
+    expect(fn (): string => adm_download(['type' => 'orphans', 'table' => 'provider']))->toThrow(AdminTestDied::class, 'Cannot open the output stream.');
 });
 
 it('treats a row that lacks an orphaned column as empty', function (): void {
@@ -1575,9 +1592,15 @@ it('adds a by-field breakdown to a complete run that has one', function (): void
     ]);
     $html = adm_capture(fn () => Admin::page());
 
+    $by_field = strpos($html, 'By field');
+    $row = strpos($html, '<code>bf-2</code>');
+    if ($by_field === false || $row === false) {
+        throw new LogicException('The by-field section or the run row is missing from the page.');
+    }
+
     expect($html)->toContain('<tr class="acfm-sub"><td colspan="8"><details><summary>By field</summary><table class="acfm-compact"><thead><tr><th>Field</th><th>fill</th><th>overwrite</th><th>clear</th></tr></thead><tbody><tr><td>a&lt;b</td><td>1</td><td>2</td><td>3</td></tr><tr><td>c</td><td>0</td><td>0</td><td>4</td></tr></tbody></table></details></td></tr>')
         ->and(substr_count($html, 'By field'))->toBe(1)
-        ->and(strpos($html, 'By field'))->toBeLessThan(strpos($html, '<code>bf-2</code>'));
+        ->and($by_field)->toBeLessThan($row);
 });
 
 it('adds no breakdown when a complete run has no by-field rows', function (): void {

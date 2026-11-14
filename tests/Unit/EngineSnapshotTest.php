@@ -130,7 +130,7 @@ function eng_snap_calls(ArrayObject $st, array $names): array
  */
 function eng_snap_order(ArrayObject $st): array
 {
-    return array_map(fn (array $row): string => $row[0], $st['log']);
+    return array_values(array_map(fn (array $row): string => $row[0], $st['log']));
 }
 
 /**
