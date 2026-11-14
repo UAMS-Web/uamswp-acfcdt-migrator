@@ -85,8 +85,10 @@ class Admin
                 }
                 $snap_list = [];
                 foreach ($snaps as $ref => $i) {
-                    $snap_list[] = esc_html($ref).(($i['status'] ?? '') === 'complete' ? '' : ' <em>(incomplete)</em>');
+                    $snap_list[] = esc_html($ref).(($i['status'] ?? null) === 'complete' ? '' : ' <em>(incomplete)</em>');
                 }
+                // `%d` converts to an integer itself.
+                // @pest-mutate-ignore: RemoveIntegerCast
                 printf(
                     '<tr><td><strong>%d</strong> %s</td><td>%s</td><td>%s</td><td>%s</td><td><a class="button" href="%s">Open</a></td></tr>',
                     (int) $s->blog_id,
@@ -122,8 +124,10 @@ class Admin
         $snaps = Store::headers('snapinfo');
         $runs = Store::headers('run');
         $rbs = Store::headers('rollback');
+        // `! $has_tables` reads an array and a boolean alike.
+        // @pest-mutate-ignore: RemoveBooleanCast
         $has_tables = (bool) array_filter($inv['tables'], fn (array $t): bool => ! empty($t['exists']));
-        $complete = array_keys(array_filter($snaps, fn (array $i): bool => ($i['status'] ?? '') === 'complete'));
+        $complete = array_keys(array_filter($snaps, fn (array $i): bool => ($i['status'] ?? null) === 'complete'));
         ?>
 		<div class="wrap acfm">
 			<h1>ACFCDT Migration — site <?php echo (int) $inv['blog_id']; ?> <small><?php echo esc_html($inv['url']); ?></small></h1>
@@ -272,6 +276,8 @@ class Admin
                 $status = $i['status'] ?? '?';
                 $posts = Store::count('snapshot', $ref);
                 $progress = $status === 'complete' ? $posts : $engine->posts_upto($i['cursor'] ?? 0).' / '.(isset($i['total']) ? (int) $i['total'] : '?');
+                // The cursor and total sit in `%d` slots, which convert to an integer themselves.
+                // @pest-mutate-ignore: RemoveIntegerCast
                 printf(
                     '<tr><td><code>%1$s</code></td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td>%5$s</td><td>%6$s <a class="button button-small" href="%7$s">Download</a> <button class="button button-small button-link-delete" data-acfm-delete="snapshot" data-ref="%1$s">Delete</button></td></tr>',
                     esc_html($ref),
@@ -297,11 +303,15 @@ class Admin
             $rb_txt = $rb ? esc_html($rb['status']) : '—';
             $actions = sprintf('<a class="button button-small" href="%s">Changes</a> ', esc_url(self::dl_url(['type' => 'changes', 'ref' => $ref])));
             if ($status !== 'complete') {
+                // The cursor, total and done count sit in `%d` slots, which convert to an integer themselves.
+                // @pest-mutate-ignore: RemoveIntegerCast
                 $actions .= sprintf('<button class="button button-small" data-acfm-resume="backfill" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button> ', esc_attr($ref), (int) ($r['cursor'] ?? 0), (int) $r['total'], $engine->posts_upto($r['cursor'] ?? 0));
             }
             if (empty($r['dry'])) {
                 $actions .= sprintf('<a class="button button-small" href="%s">Backups</a> ', esc_url(self::dl_url(['type' => 'backups', 'ref' => $ref])));
                 if (! $rb || $rb['status'] !== 'complete') {
+                    // The cursor sits in a `%d` slot, which converts to an integer itself.
+                    // @pest-mutate-ignore: RemoveIntegerCast
                     $actions .= sprintf(
                         '<button class="button button-small" data-acfm-rollback="%1$s"%2$s>%3$s</button> ',
                         esc_attr($ref),
@@ -311,6 +321,10 @@ class Admin
                 }
             }
             $actions .= sprintf('<button class="button button-small button-link-delete" data-acfm-delete="run" data-ref="%s">Delete</button>', esc_attr($ref));
+            $notes = ($st['skipped'] ? ' ('.(int) $st['skipped'].' skipped)' : '').(! empty($st['invalid']) ? ' <strong style="color:#b32d2e">'.(int) $st['invalid'].' invalid — see Changes</strong>' : '');
+            $mismatches = $st['write_mismatch'] ? '<strong style="color:#b32d2e">'.(int) $st['write_mismatch'].'</strong>' : '0';
+            // The counts sit in `%d` slots, which convert to an integer themselves.
+            // @pest-mutate-ignore: RemoveIntegerCast
             printf(
                 '<tr><td><code>%s</code><br><small>%s</small></td><td>%s</td><td>%s</td><td>%d / %d</td><td>%d / %d / %d%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
                 esc_html($ref),
@@ -322,8 +336,8 @@ class Admin
                 (int) $st['fill'],
                 (int) $st['overwrite'],
                 (int) $st['clear'],
-                ($st['skipped'] ? ' ('.(int) $st['skipped'].' skipped)' : '').(! empty($st['invalid']) ? ' <strong style="color:#b32d2e">'.(int) $st['invalid'].' invalid — see Changes</strong>' : ''),
-                $st['write_mismatch'] ? '<strong style="color:#b32d2e">'.(int) $st['write_mismatch'].'</strong>' : '0',
+                $notes,
+                $mismatches,
                 $rb_txt,
                 $actions
             );
@@ -349,6 +363,8 @@ class Admin
         ignore_user_abort(true); // finish the batch even if the browser goes away
 
         $p = wp_unslash($_POST);
+        // An empty or an unmatched name both reach the unknown-operation error.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         $op = isset($p['op']) ? sanitize_key($p['op']) : '';
         try {
             if (! Engine::acf_ready()) {
@@ -422,6 +438,8 @@ class Admin
         }
         check_admin_referer(self::NONCE);
         $g = wp_unslash($_GET);
+        // An empty or an unmatched type both reach the unknown-download error.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         $type = isset($g['type']) ? sanitize_key($g['type']) : '';
         $blog = get_current_blog_id();
         @set_time_limit(300);
@@ -432,6 +450,8 @@ class Admin
                 case 'archive':
                 case 'orphans':
                     $defs = $engine->site->active_defs();
+                    // An empty or an unmatched name are both absent from the active tables.
+                    // @pest-mutate-ignore: EmptyStringToNotEmpty
                     $name = $g['table'] ?? '';
                     if (! isset($defs[$name])) {
                         throw new \RuntimeException('Unknown table.');
@@ -446,22 +466,22 @@ class Admin
                         $orphans = $engine->orphan_columns($defs[$name]);
                         self::headers("site-$blog-$table-orphan-columns.csv", 'text/csv');
                         $out = fopen('php://output', 'w');
-                        fputcsv($out, array_merge(['post_id'], $orphans));
+                        fputcsv($out, array_merge(['post_id'], $orphans), ',', '"', '\\');
                         $engine->each_table_row($name, function ($row) use ($out, $orphans): void {
                             $vals = [];
                             $any = false;
                             foreach ($orphans as $c) {
                                 $v = $row[$c] ?? '';
                                 $vals[] = $v;
-                                $any = $any || (! in_array($v, [null, '', '[]'], true));
+                                $any = $any || (! in_array($v, ['', '[]'], true));
                             }
                             if ($any) {
-                                fputcsv($out, array_merge([$row['post_id']], $vals));
+                                fputcsv($out, array_merge([$row['post_id']], $vals), ',', '"', '\\');
                             }
                         });
                         fclose($out);
                     }
-                    exit;
+                    self::finish();
 
                 case 'snapshot':
                 case 'changes':
@@ -477,7 +497,7 @@ class Admin
                             $after = (int) $r->id;
                         }
                     } while (count($rows) === 500);
-                    exit;
+                    self::finish();
 
                 case 'compare':
                     $ignore = array_filter(array_map(trim(...), explode(',', $g['ignore'] ?? '')));
@@ -487,12 +507,22 @@ class Admin
                     foreach ($res['diffs'] as $d) {
                         echo Normalizer::json($d), "\n";
                     }
-                    exit;
+                    self::finish();
             }
             throw new \RuntimeException('Unknown download.');
         } catch (\Throwable $throwable) {
             wp_die(esc_html($throwable->getMessage()));
         }
+    }
+
+    /**
+     * Ends the request. A method of its own so a test can stop where the download would.
+     *
+     * @codeCoverageIgnore
+     */
+    private static function finish(): never
+    {
+        exit;
     }
 
     private static function headers(string $filename, string $type): void
