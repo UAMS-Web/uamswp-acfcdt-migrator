@@ -594,6 +594,8 @@ class Engine
         }
 
         $rb = Store::get('rollback', $stamp);
+        // The default never equals 'complete', whatever its value.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         if ($rb && ($rb['status'] ?? '') === 'complete' && ! $force) {
             throw new \RuntimeException("Run '$stamp' was already rolled back.");
         }
@@ -623,6 +625,8 @@ class Engine
                 $wpdb->insert($wpdb->postmeta, ['post_id' => (int) $e['post_id'], 'meta_key' => $m[0], 'meta_value' => $m[1]], ['%d', '%s', '%s']);
             }
 
+            // Only the keys are read, and PHP turns a numeric string key into an integer.
+            // @pest-mutate-ignore: RemoveIntegerCast, TrueToFalse
             $posts[(int) $e['post_id']] = true;
             $cursor = (int) $r->id;
         }
@@ -633,6 +637,8 @@ class Engine
         }
 
         $done = count($rows) < $limit;
+        // Store::get() returns null or an array, and a null takes the key the same way.
+        // @pest-mutate-ignore: RemoveArrayCast
         $rb = (array) Store::get('rollback', $stamp);
         $rb['cursor'] = $cursor;
         if ($done) {

@@ -401,3 +401,13 @@ it('reads a page exactly the size of the limit as not done', function (int $limi
     'limit equal to the page' => [3, false],
     'limit below the page' => [2, false],
 ]);
+
+it('restores nothing for a backup whose rows are null', function (): void {
+    $entry = ['post_id' => '7', 'field' => 'name', 'rows' => null];
+
+    [$result, $st] = eng_rb_batch([eng_rb_row(9, $entry)]);
+
+    expect($result['processed'])->toBe(1)
+        ->and(eng_rb_calls($st, 'delete_meta_rows_for_field'))->toHaveCount(1)
+        ->and(eng_rb_calls($st, 'insert'))->toBe([]);
+});
