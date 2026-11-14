@@ -123,12 +123,6 @@ local. Run the repository's gate, not another repository's: `composer audit`, th
 job parity. Where a patch retired, the gate must exercise the now-unpatched tool and be **seen**
 green (the lifecycle skill's *Proving it worked*).
 
-```bash
-node .claude/skills/local-ci/local-ci.mjs      # full job parity; see the local-ci skill
-```
-
-The runner and its options are the [`local-ci`](../local-ci/SKILL.md) skill.
-
 Those runs can be multi-minute. Bound them per the
 [`long-running-commands`](../../rules/long-running-commands.md) rule, and note **macOS ships no
 `timeout(1)`**, so on a Mac use that rule's perl-alarm fallback.
@@ -205,4 +199,3 @@ lifecycle, its registration forms and the removal order →
 [`worktrees`](../../rules/worktrees.md); REST-vs-GraphQL →
 [`github-api-budget`](../../rules/github-api-budget.md).
 
-The local gate → [`local-ci`](../local-ci/SKILL.md).

@@ -183,7 +183,7 @@ Three jobs, one per tool, run before a pull request where remote CI does not run
 | `rector` | `vendor/bin/rector --dry-run` (the gating profile) | any `.php` under the paths `rector.php` names |
 | `phpstan` | `composer stan` | any `.php` in the diff, tests included, because `phpstan.neon.dist` lists `tests` |
 
-Add them to the repository's `local-ci.json`; the job file's format and how the runner selects jobs from the diff are in the [local-ci skill](../local-ci/SKILL.md). Private repositories run the tools there and not in GitHub Actions, where minutes are billed. A private repository that does not have the local-ci runner yet still runs the three commands above locally before every push (and may put the same three steps in a workflow if the org accepts the Actions minutes); adopting the [local-ci skill](../local-ci/SKILL.md) is the longer-term path so the runner owns gating without billed minutes.
+This repository is public, so Actions minutes are free: run the three commands as steps of its CI workflow, and locally before pushing. A private repository without the local-ci runner yet does the same three commands locally before every push (or as workflow steps if minutes are acceptable); adopt local-ci when that skill is available in the checkout so gating stops depending on Actions.
 
 ### The CI workflow template
 
@@ -426,7 +426,7 @@ Never reformat vendor code, and never let the reformat commit include it: if Pin
 
 In a public repository whose CI workflow runs the three tools, that run on a draft pull request is the pre-PR check. Before each push, run the three tools on the changed files with the commands in *Local CI jobs* below (`vendor/bin/pint --test` and `vendor/bin/rector --dry-run` with the changed PHP files as arguments, and `composer stan`; a repository without one of the tools skips it), then open the pull request as a draft, fix what the workflow reports by pushing to the same branch, and flip it to ready once every remote check is green. The [`writing-pull-requests`](../writing-pull-requests/SKILL.md) skill's *Draft state and merge order* owns this and names the cases that still run locally. Where the tools have no remote run:
 
-Run the three jobs through the local runner on the branch, and fix what they report before asking for review. A reviewer should see the runner's verdict for the commit under review.
+Run the three commands on the branch, and fix what they report before asking for review.
 
 A finding you disagree with is argued in the configuration, with a reason, scoped as narrowly as the tool allows. Never a blanket suppression.
 
