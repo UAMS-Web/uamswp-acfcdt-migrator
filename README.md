@@ -125,17 +125,17 @@ Sandbox (separate DB, not your Local site): WP 7.0.6 subdirectory multisite, ACF
 
 ## Running the tests
 
-The unit suite uses Pest 5 with Brain Monkey, so it needs no database and no WordPress checkout. The plugin needs PHP 8.2 or later (`Requires PHP` in the plugin header, `require.php` in `composer.json`). The tests run on PHP 8.4 (`config.platform.php` in `composer.json`), and the `lint-floor` job of the local CI runner checks every shipped file parses on PHP 8.2.
+The unit suite uses Pest 5 with Brain Monkey, so it needs no database and no WordPress checkout. The plugin needs PHP 8.2 or later (`Requires PHP` in the plugin header, `require.php` in `composer.json`). The tests run on PHP 8.4 (`config.platform.php` in `composer.json`), and every shipped file must parse on PHP 8.2 (`php -l` on that version).
 
 ```bash
 composer install
 composer test
 ```
 
-Before a pull request, run the shared local CI runner, which includes the suite:
+Before a pull request, run the suite locally; remote CI runs the checks on every pull request:
 
 ```bash
-node .claude/skills/local-ci/local-ci.mjs > ci.log 2>&1
+vendor/bin/pest
 ```
 
 ## Credits
