@@ -58,14 +58,14 @@ class Site
         }
 
         $this->defs = [];
-        foreach ((array) glob($this->json_dir().'/*.json') as $file) {
+        foreach (glob($this->json_dir().'/*.json') ?: [] as $file) {
             $def = json_decode((string) file_get_contents($file), true);
             if (! is_array($def) || empty($def['name'])) {
                 continue;
             }
 
             $rel = $def['relationship'] ?? [];
-            if (($rel['type'] ?? '') !== 'post' || empty($rel['post_type'])) {
+            if (($rel['type'] ?? null) !== 'post' || empty($rel['post_type'])) {
                 continue;
             }
 
@@ -197,6 +197,8 @@ class Site
             return [];
         }
 
+        // `implode()` discards the keys `array_fill()` numbers from, so the first index changes nothing.
+        // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($types), '%s'));
         $sql = $wpdb->prepare(
             "SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
