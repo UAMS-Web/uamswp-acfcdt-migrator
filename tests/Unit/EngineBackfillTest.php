@@ -532,7 +532,7 @@ it('files a clear when no_clear is off, and skips it when no_clear is on', funct
     $change = eng_bf_puts($st, 'change')[0][3];
     expect($result['written'])->toBe($written)
         ->and($change['category'])->toBe('clear')
-        ->and(isset($change['skipped']))->toBe($no_clear)
+        ->and($change['skipped'] ?? null)->toBe($no_clear ? true : null)
         ->and(eng_bf_puts($st, 'backup'))->toHaveCount($written);
 })->with([
     'clearing allowed' => [false, 1],
@@ -578,7 +578,7 @@ it('never writes a corrupted id, and flags it', function (bool $dry): void {
     $record = eng_bf_puts($st, 'change')[0][3];
     expect($result['written'])->toBe(0)
         ->and($record['invalid'])->toBeTrue()
-        ->and(isset($record['skipped']))->toBe(! $dry)
+        ->and($record['skipped'] ?? null)->toBe($dry ? null : true)
         ->and(eng_bf_puts($st, 'backup'))->toBe([])
         ->and(eng_bf_calls($st, 'acf_update_value'))->toBe([]);
 })->with([
@@ -725,4 +725,18 @@ it('puts the hooks back after the loop and before it writes the run record', fun
 
     $names = eng_bf_order($st);
     expect(array_slice($names, -3))->toBe(['guard.attach', 'change_summary', 'put']);
+});
+
+it('carries on to the next field after skipping one', function (): void {
+    $fields = ['a' => eng_bf_field('a'), 'b' => eng_bf_field('b')];
+
+    [$result, $st] = eng_bf_batch([eng_bf_post(7)], [
+        'fields' => $fields,
+        'eff' => [7 => ['k_a' => null, 'k_b' => 'served']],
+        'meta' => [7 => ['k_a' => 'stale', 'k_b' => null]],
+    ], run: ['no_clear' => true]);
+
+    expect($result['written'])->toBe(1)
+        ->and(array_column(eng_bf_puts($st, 'change'), 2))->toBe(['a', 'b'])
+        ->and(eng_bf_calls($st, 'acf_update_value'))->toBe([['acf_update_value', 'served', 7, 'k_b']]);
 });
