@@ -20,7 +20,12 @@
     <source>
         <include>
             <directory suffix=".php">./includes</directory>
-            <file>./uamswp-acfcdt-migrator.php</file>
+            <!--
+                The main plugin file is left out on purpose (decision recorded in docs/DECISIONS.md, issue #55).
+                It holds the double-load guard, two defines, one require and one call into Loader, and a file-scope
+                return cannot be reached from the other side without a fresh process per test, which this build
+                does not support. The class it calls, includes/class-loader.php, is in the source above.
+            -->
         </include>
     </source>
 </phpunit>
