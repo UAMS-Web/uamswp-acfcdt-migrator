@@ -48,7 +48,7 @@ Then, once for the whole network:
 10. On each site, take snapshot `after-off`, then compare `before` vs `after-off`. It must show **✔ Identical**.
 11. Click through provider profiles, location pages, and the Providers/Locations blocks filtered by location and area of expertise. Rebuild the FacetWP index.
 12. Practise going back:
-    - reactivate the plugin, then use **Roll back** on the real run (it restores the original postmeta exactly), **or**
+    - reactivate the plugin, then use **Roll back** on the real run (it restores the original postmeta exactly, including the rows ACF rewrites on related posts through bidirectional relationships), **or**
     - restore the DB backup.
 
 Rehearsal 2: restore the backup and repeat. You're ready for production when steps 5–8 and 10 all come out clean.
