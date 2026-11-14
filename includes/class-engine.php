@@ -492,7 +492,9 @@ class Engine
                 // default value, which can differ from the empty value the site serves today.
                 // wp_slash(): update_metadata() runs wp_unslash() on every value, which would strip one level
                 // of backslashes from any content that contains them (e.g. \&quot; inside saved HTML).
-                acf_update_value(wp_slash($eff[$name] ?? ''), $post_id, $field);
+                // Every field has an effective value by this point, so the default is never used.
+                // @pest-mutate-ignore: EmptyStringToNotEmpty
+                $this->write_with_trail($stamp, $post_id, $name, $field, $complex, $eff[$name] ?? '');
                 $written++;
                 $changed = true;
 
@@ -529,6 +531,50 @@ class Engine
         }
 
         return ['processed' => count($posts), 'cursor' => $cursor, 'done' => $done, 'written' => $written, 'mismatches' => $mismatch, 'warnings' => $warnings];
+    }
+
+    /**
+     * Writes one field's value through ACF, first backing up every OTHER postmeta row the write is about to touch.
+     *
+     * ACF Extended's bidirectional relationships answer a write on one post by rewriting the related post's value and
+     * its `_<field>` reference row, and the reference there is the related field's key, which can differ from the one
+     * stored. Those rows belong to a post the batch never visits as the owner of that field, so the backup of "the
+     * rows this field owns" misses them and a rollback would leave them changed. The first backup of a row wins
+     * (INSERT IGNORE), so the state before the run is the one a rollback restores.
+     *
+     * @param  array<string, mixed>  $field
+     * @param  bool  $complex  whether the field owns sub-field rows, which the backup of its own rows already holds
+     */
+    private function write_with_trail(string $stamp, int $post_id, string $name, array $field, bool $complex, mixed $value): void
+    {
+        $trail = function ($check, $object_id, $meta_key) use ($stamp, $post_id, $name, $complex) {
+            $object_id = (int) $object_id;
+            $touched = ltrim((string) $meta_key, '_');
+            $own = $object_id === $post_id && ($touched === $name || ($complex && str_starts_with($touched, $name.'_')));
+            if (! $own) {
+                Store::put('backup', $stamp, $object_id, $touched, [
+                    'post_id' => $object_id,
+                    'field' => $touched,
+                    'complex' => false,
+                    'rows' => $this->site->meta_rows_for_field($object_id, $touched, false),
+                ], 'ignore');
+            }
+
+            return $check;
+        };
+
+        $hooks = ['update_post_metadata', 'add_post_metadata', 'delete_post_metadata'];
+        foreach ($hooks as $hook) {
+            add_filter($hook, $trail, 1, 3);
+        }
+
+        try {
+            acf_update_value(wp_slash($value), $post_id, $field);
+        } finally {
+            foreach ($hooks as $hook) {
+                remove_filter($hook, $trail, 1);
+            }
+        }
     }
 
     /* ================================================================== rollback */
