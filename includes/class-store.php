@@ -18,17 +18,18 @@ class Store {
 
 	const DB_VERSION = 1;
 
-	public static function table() {
+	public static function table(): string {
 		global $wpdb;
 
 		return $wpdb->base_prefix . 'acfcdt_migration';
 	}
 
-	public static function install() {
+	public static function install(): void {
 		global $wpdb;
 		if ( (int) get_site_option( 'uamswp_acfcdt_migrator_db', 0 ) >= self::DB_VERSION && self::exists() ) {
 			return;
 		}
+
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		$table   = self::table();
 		$charset = $wpdb->get_charset_collate();
@@ -48,7 +49,7 @@ class Store {
 		update_site_option( 'uamswp_acfcdt_migrator_db', self::DB_VERSION );
 	}
 
-	public static function exists() {
+	public static function exists(): bool {
 		global $wpdb;
 		$t = self::table();
 
@@ -94,8 +95,11 @@ class Store {
 		) );
 	}
 
-	/** Every row of a kind/ref decoded, keyed by post_id (snapshots). */
-	public static function by_post( $kind, $ref ) {
+	/**
+     * Every row of a kind/ref decoded, keyed by post_id (snapshots).
+     * @return mixed[]
+     */
+    public static function by_post( $kind, $ref ): array {
 		$out   = [];
 		$after = 0;
 		do {
@@ -109,7 +113,7 @@ class Store {
 		return $out;
 	}
 
-	public static function count( $kind, $ref, $where_sql = '' ) {
+	public static function count( $kind, $ref, $where_sql = '' ): int {
 		global $wpdb;
 
 		return (int) $wpdb->get_var( $wpdb->prepare(
@@ -128,8 +132,11 @@ class Store {
 		) );
 	}
 
-	/** List refs of a header kind (snapinfo / run) with their header data. */
-	public static function headers( $kind ) {
+	/**
+     * List refs of a header kind (snapinfo / run) with their header data.
+     * @return non-empty-array[]
+     */
+    public static function headers( $kind ): array {
 		global $wpdb;
 		$rows = $wpdb->get_results( $wpdb->prepare(
 			'SELECT ref, data, created FROM ' . self::table() . ' WHERE blog_id = %d AND kind = %s ORDER BY id DESC',
@@ -144,7 +151,7 @@ class Store {
 	}
 
 	/** Category counts for a backfill run, computed from change rows (accurate even if batches were retried). */
-	public static function change_summary( $stamp ) {
+	public static function change_summary( $stamp ): array {
 		global $wpdb;
 		$rows  = $wpdb->get_col( $wpdb->prepare(
 			'SELECT data FROM ' . self::table() . ' WHERE blog_id = %d AND kind = %s AND ref = %s',
@@ -160,19 +167,22 @@ class Store {
 			if ( ! empty( $c['skipped'] ) ) {
 				$stats['skipped'] ++;
 			}
+
 			if ( ! empty( $c['invalid'] ) ) {
 				$stats['invalid'] ++;
 			}
+
 			if ( ! empty( $c['write_mismatch'] ) ) {
 				$stats['write_mismatch'] ++;
 			}
+
 			$posts[ $c['post_id'] ] = true;
 			$k                      = $c['post_type'] . '.' . $c['field'];
-			if ( ! isset( $by[ $k ] ) ) {
-				$by[ $k ] = [ 'field' => $k, 'fill' => 0, 'overwrite' => 0, 'clear' => 0 ];
-			}
+            $by[ $k ] ??= [ 'field' => $k, 'fill' => 0, 'overwrite' => 0, 'clear' => 0 ];
+
 			$by[ $k ][ $c['category'] ] ++;
 		}
+
 		$stats['posts'] = count( $posts );
 		ksort( $by );
 

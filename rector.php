@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Rector\Php81\Rector\Array_\ArrayToFirstClassCallableRector;
 use Rector\CodeQuality\Rector\ClassMethod\LocallyCalledStaticMethodToNonStaticRector;
 use Rector\Config\RectorConfig;
 use Rector\DeadCode\Rector\Property\RemoveUselessVarTagRector;
@@ -80,7 +81,7 @@ $sweepOnlyRules = [
     // handle used to register can never equal the one used to remove -- hook
     // removal silently stops working, with nothing to see at the call site
     // (uamswp-migration-api docs/DECISIONS.md D-016).
-    \Rector\Php81\Rector\Array_\ArrayToFirstClassCallableRector::class,
+    ArrayToFirstClassCallableRector::class,
 ];
 
 // Rules skipped in BOTH profiles, scoped to one file. Use this list for a

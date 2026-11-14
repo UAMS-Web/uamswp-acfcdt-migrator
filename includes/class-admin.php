@@ -14,28 +14,30 @@ namespace UAMSWP_ACFCDT_Migrator;
 class Admin {
 
 	const SLUG   = 'uamswp-acfcdt-migration';
+
 	const ACTION = 'uamswp_acfcdt_mig';
+
 	const NONCE  = 'uamswp_acfcdt_mig';
 
-	public static function init() {
-		add_action( 'admin_menu', [ __CLASS__, 'menu' ] );
-		add_action( 'network_admin_menu', [ __CLASS__, 'network_menu' ] );
-		add_action( 'wp_ajax_' . self::ACTION, [ __CLASS__, 'ajax' ] );
-		add_action( 'admin_post_' . self::ACTION . '_dl', [ __CLASS__, 'download' ] );
+	public static function init(): void {
+		add_action( 'admin_menu', [ self::class, 'menu' ] );
+		add_action( 'network_admin_menu', [ self::class, 'network_menu' ] );
+		add_action( 'wp_ajax_' . self::ACTION, [ self::class, 'ajax' ] );
+		add_action( 'admin_post_' . self::ACTION . '_dl', [ self::class, 'download' ] );
 	}
 
 	public static function can() {
 		return is_multisite() ? current_user_can( 'manage_network_options' ) : current_user_can( 'manage_options' );
 	}
 
-	public static function menu() {
+	public static function menu(): void {
 		if ( self::can() ) {
-			add_management_page( 'ACFCDT Migration', 'ACFCDT Migration', is_multisite() ? 'manage_network_options' : 'manage_options', self::SLUG, [ __CLASS__, 'page' ] );
+			add_management_page( 'ACFCDT Migration', 'ACFCDT Migration', is_multisite() ? 'manage_network_options' : 'manage_options', self::SLUG, [ self::class, 'page' ] );
 		}
 	}
 
-	public static function network_menu() {
-		add_submenu_page( 'settings.php', 'ACFCDT Migration', 'ACFCDT Migration', 'manage_network_options', self::SLUG, [ __CLASS__, 'network_page' ] );
+	public static function network_menu(): void {
+		add_submenu_page( 'settings.php', 'ACFCDT Migration', 'ACFCDT Migration', 'manage_network_options', self::SLUG, [ self::class, 'network_page' ] );
 	}
 
 	private static function page_url( $blog_id = null ) {
@@ -50,7 +52,7 @@ class Admin {
 
 	/* ================================================================== network overview */
 
-	public static function network_page() {
+	public static function network_page(): void {
 		if ( ! self::can() ) {
 			wp_die( 'Not allowed.' );
 		}
@@ -62,7 +64,7 @@ class Admin {
 			switch_to_blog( $s->blog_id );
 			$site   = new Site();
 			$tables = array_keys( $site->active_defs() );
-			if ( $tables ) {
+			if ( $tables !== [] ) {
 				$any   = true;
 				Store::install();
 				$snaps = Store::headers( 'snapinfo' );
@@ -70,18 +72,18 @@ class Admin {
 				$latest = '—';
 				foreach ( $runs as $ref => $r ) {
 					if ( empty( $r['dry'] ) ) {
-						$latest = esc_html( $ref . ' (' . ( isset( $r['status'] ) ? $r['status'] : '?' ) . ( isset( $r['stats']['fields'] ) ? ', ' . (int) $r['stats']['fields'] . ' fields' : '' ) . ( ! empty( $r['stats']['write_mismatch'] ) ? ', ' . (int) $r['stats']['write_mismatch'] . ' MISMATCHES' : '' ) . ')' );
+						$latest = esc_html( $ref . ' (' . ( $r['status'] ?? '?' ) . ( isset( $r['stats']['fields'] ) ? ', ' . (int) $r['stats']['fields'] . ' fields' : '' ) . ( ! empty( $r['stats']['write_mismatch'] ) ? ', ' . (int) $r['stats']['write_mismatch'] . ' MISMATCHES' : '' ) . ')' );
 						break;
 					}
 				}
 				$snap_list = [];
 				foreach ( $snaps as $ref => $i ) {
-					$snap_list[] = esc_html( $ref ) . ( ( isset( $i['status'] ) ? $i['status'] : '' ) === 'complete' ? '' : ' <em>(incomplete)</em>' );
+					$snap_list[] = esc_html( $ref ) . ( ( $i['status'] ?? '' ) === 'complete' ? '' : ' <em>(incomplete)</em>' );
 				}
 				printf(
 					'<tr><td><strong>%d</strong> %s</td><td>%s</td><td>%s</td><td>%s</td><td><a class="button" href="%s">Open</a></td></tr>',
 					(int) $s->blog_id, esc_html( $s->domain . $s->path ), esc_html( implode( ', ', $tables ) ),
-					$snap_list ? implode( ', ', $snap_list ) : '—', $latest, esc_url( self::page_url( $s->blog_id ) )
+					$snap_list !== [] ? implode( ', ', $snap_list ) : '—', $latest, esc_url( self::page_url( $s->blog_id ) )
 				);
 			}
 			restore_current_blog();
@@ -94,7 +96,7 @@ class Admin {
 
 	/* ================================================================== site page */
 
-	public static function page() {
+	public static function page(): void {
 		if ( ! self::can() ) {
 			wp_die( 'Not allowed.' );
 		}
@@ -108,12 +110,8 @@ class Admin {
 		$snaps  = Store::headers( 'snapinfo' );
 		$runs   = Store::headers( 'run' );
 		$rbs    = Store::headers( 'rollback' );
-		$has_tables = (bool) array_filter( $inv['tables'], function ( $t ) {
-			return ! empty( $t['exists'] );
-		} );
-		$complete = array_keys( array_filter( $snaps, function ( $i ) {
-			return ( isset( $i['status'] ) ? $i['status'] : '' ) === 'complete';
-		} ) );
+		$has_tables = (bool) array_filter( $inv['tables'], fn(array $t): bool => ! empty( $t['exists'] ) );
+		$complete = array_keys( array_filter( $snaps, fn(array $i): bool => ( $i['status'] ?? '' ) === 'complete' ) );
 		?>
 		<div class="wrap acfm">
 			<h1>ACFCDT Migration — site <?php echo (int) $inv['blog_id']; ?> <small><?php echo esc_html( $inv['url'] ); ?></small></h1>
@@ -155,7 +153,7 @@ class Admin {
 						rows for other post types: <?php echo (int) $t['wrong_type']; ?> ·
 						<?php echo esc_html( $t['post_type'] ); ?> posts with no row: <?php echo (int) $t['no_row']; ?>
 					</p>
-					<?php $cs = isset( $inv['cache'][ $t['name'] ] ) ? $inv['cache'][ $t['name'] ] : null; ?>
+					<?php $cs = $inv['cache'][ $t['name'] ] ?? null; ?>
 					<?php if ( $cs ) : ?>
 						<p>
 							Table map cache: post type <code><?php echo esc_html( $cs['cache_post_type'] ?: '(none)' ); ?></code> —
@@ -244,8 +242,8 @@ class Admin {
 	}
 
 	/** Snapshot list or backfill-run list with actions. */
-	private static function header_table( $type, array $items, Engine $engine, array $rollbacks = [] ) {
-		if ( ! $items ) {
+	private static function header_table( string $type, array $items, Engine $engine, array $rollbacks = [] ): void {
+		if ( $items === [] ) {
 			echo '<p><em>None yet.</em></p>';
 
 			return;
@@ -253,13 +251,13 @@ class Admin {
 		if ( $type === 'snapshot' ) {
 			echo '<table class="widefat striped acfm-compact"><thead><tr><th>Name</th><th>Mode</th><th>Status</th><th>Posts</th><th>Started (UTC)</th><th></th></tr></thead><tbody>';
 			foreach ( $items as $ref => $i ) {
-				$status   = isset( $i['status'] ) ? $i['status'] : '?';
+				$status   = $i['status'] ?? '?';
 				$posts    = Store::count( 'snapshot', $ref );
-				$progress = $status === 'complete' ? $posts : $engine->posts_upto( isset( $i['cursor'] ) ? $i['cursor'] : 0 ) . ' / ' . ( isset( $i['total'] ) ? (int) $i['total'] : '?' );
+				$progress = $status === 'complete' ? $posts : $engine->posts_upto( $i['cursor'] ?? 0 ) . ' / ' . ( isset( $i['total'] ) ? (int) $i['total'] : '?' );
 				printf(
 					'<tr><td><code>%1$s</code></td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td>%5$s</td><td>%6$s <a class="button button-small" href="%7$s">Download</a> <button class="button button-small button-link-delete" data-acfm-delete="snapshot" data-ref="%1$s">Delete</button></td></tr>',
-					esc_html( $ref ), esc_html( isset( $i['mode'] ) ? $i['mode'] : '' ), esc_html( $status ), esc_html( $progress ), esc_html( isset( $i['started'] ) ? $i['started'] : '' ),
-					$status === 'complete' ? '' : sprintf( '<button class="button button-small" data-acfm-resume="snapshot" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button>', esc_attr( $ref ), (int) ( isset( $i['cursor'] ) ? $i['cursor'] : 0 ), (int) ( isset( $i['total'] ) ? $i['total'] : 0 ), $engine->posts_upto( isset( $i['cursor'] ) ? $i['cursor'] : 0 ) ),
+					esc_html( $ref ), esc_html( $i['mode'] ?? '' ), esc_html( $status ), esc_html( $progress ), esc_html( $i['started'] ?? '' ),
+					$status === 'complete' ? '' : sprintf( '<button class="button button-small" data-acfm-resume="snapshot" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button>', esc_attr( $ref ), (int) ( $i['cursor'] ?? 0 ), (int) ( $i['total'] ?? 0 ), $engine->posts_upto( $i['cursor'] ?? 0 ) ),
 					esc_url( self::dl_url( [ 'type' => 'snapshot', 'ref' => $ref ] ) )
 				);
 			}
@@ -270,26 +268,26 @@ class Admin {
 
 		echo '<table class="widefat striped acfm-compact"><thead><tr><th>Run</th><th>Type</th><th>Status</th><th>Posts / fields changed</th><th>fill / overwrite / clear</th><th>Mismatches</th><th>Rollback</th><th></th></tr></thead><tbody>';
 		foreach ( $items as $ref => $r ) {
-			$status = isset( $r['status'] ) ? $r['status'] : '?';
+			$status = $r['status'] ?? '?';
 			$sum    = isset( $r['stats'] ) ? $r : Store::change_summary( $ref );
 			$st     = $sum['stats'];
-			$rb     = isset( $rollbacks[ $ref ] ) ? $rollbacks[ $ref ] : null;
+			$rb     = $rollbacks[ $ref ] ?? null;
 			$rb_txt = $rb ? esc_html( $rb['status'] ) : '—';
 			$actions = sprintf( '<a class="button button-small" href="%s">Changes</a> ', esc_url( self::dl_url( [ 'type' => 'changes', 'ref' => $ref ] ) ) );
 			if ( $status !== 'complete' ) {
-				$actions .= sprintf( '<button class="button button-small" data-acfm-resume="backfill" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button> ', esc_attr( $ref ), (int) ( isset( $r['cursor'] ) ? $r['cursor'] : 0 ), (int) $r['total'], $engine->posts_upto( isset( $r['cursor'] ) ? $r['cursor'] : 0 ) );
+				$actions .= sprintf( '<button class="button button-small" data-acfm-resume="backfill" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button> ', esc_attr( $ref ), (int) ( $r['cursor'] ?? 0 ), (int) $r['total'], $engine->posts_upto( $r['cursor'] ?? 0 ) );
 			}
 			if ( empty( $r['dry'] ) ) {
 				$actions .= sprintf( '<a class="button button-small" href="%s">Backups</a> ', esc_url( self::dl_url( [ 'type' => 'backups', 'ref' => $ref ] ) ) );
 				if ( ! $rb || $rb['status'] !== 'complete' ) {
 					$actions .= sprintf( '<button class="button button-small" data-acfm-rollback="%1$s"%2$s>%3$s</button> ', esc_attr( $ref ),
-						$rb ? sprintf( ' data-cursor="%d"', (int) ( isset( $rb['cursor'] ) ? $rb['cursor'] : 0 ) ) : '', $rb ? 'Resume rollback' : 'Roll back' );
+						$rb ? sprintf( ' data-cursor="%d"', (int) ( $rb['cursor'] ?? 0 ) ) : '', $rb ? 'Resume rollback' : 'Roll back' );
 				}
 			}
 			$actions .= sprintf( '<button class="button button-small button-link-delete" data-acfm-delete="run" data-ref="%s">Delete</button>', esc_attr( $ref ) );
 			printf(
 				'<tr><td><code>%s</code><br><small>%s</small></td><td>%s</td><td>%s</td><td>%d / %d</td><td>%d / %d / %d%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-				esc_html( $ref ), esc_html( isset( $r['started'] ) ? $r['started'] : '' ), empty( $r['dry'] ) ? '<strong>REAL</strong>' : 'dry run', esc_html( $status ),
+				esc_html( $ref ), esc_html( $r['started'] ?? '' ), empty( $r['dry'] ) ? '<strong>REAL</strong>' : 'dry run', esc_html( $status ),
 				(int) $st['posts'], (int) $st['fields'], (int) $st['fill'], (int) $st['overwrite'], (int) $st['clear'], ( $st['skipped'] ? ' (' . (int) $st['skipped'] . ' skipped)' : '' ) . ( ! empty( $st['invalid'] ) ? ' <strong style="color:#b32d2e">' . (int) $st['invalid'] . ' invalid — see Changes</strong>' : '' ),
 				$st['write_mismatch'] ? '<strong style="color:#b32d2e">' . (int) $st['write_mismatch'] . '</strong>' : '0', $rb_txt, $actions
 			);
@@ -306,7 +304,7 @@ class Admin {
 
 	/* ================================================================== AJAX */
 
-	public static function ajax() {
+	public static function ajax(): void {
 		if ( ! self::can() || ! check_ajax_referer( self::NONCE, 'nonce', false ) ) {
 			wp_send_json_error( [ 'message' => 'Not allowed (permission or expired nonce — reload the page).' ], 403 );
 		}
@@ -341,7 +339,7 @@ class Admin {
 				case 'rollback_batch':
 					wp_send_json_success( $engine->rollback_batch( $ref, $cursor, $limit ) );
 				case 'compare':
-					$ignore = array_filter( array_map( 'trim', explode( ',', isset( $p['ignore'] ) ? $p['ignore'] : '' ) ) );
+					$ignore = array_filter( array_map( trim(...), explode( ',', $p['ignore'] ?? '' ) ) );
 					$res    = $engine->compare( $p['a'], $p['b'], $ignore );
 					$total  = count( $res['diffs'] );
 					$res['diffs'] = array_slice( $res['diffs'], 0, 200 );
@@ -350,7 +348,7 @@ class Admin {
 						$d['b'] = self::preview( $d['b'] );
 					}
 					$res['total_diffs'] = $total;
-					$res['download']    = self::dl_url( [ 'type' => 'compare', 'a' => $p['a'], 'b' => $p['b'], 'ignore' => isset( $p['ignore'] ) ? $p['ignore'] : '' ] );
+					$res['download']    = self::dl_url( [ 'type' => 'compare', 'a' => $p['a'], 'b' => $p['b'], 'ignore' => $p['ignore'] ?? '' ] );
 					wp_send_json_success( $res );
 				case 'delete':
 					$kinds = $p['kind'] === 'snapshot' ? [ 'snapinfo', 'snapshot' ] : [ 'run', 'change', 'backup', 'rollback' ];
@@ -366,8 +364,8 @@ class Admin {
 				default:
 					throw new \InvalidArgumentException( 'Unknown operation.' );
 			}
-		} catch ( \Throwable $e ) {
-			wp_send_json_error( [ 'message' => $e->getMessage() ] );
+		} catch ( \Throwable $throwable ) {
+			wp_send_json_error( [ 'message' => $throwable->getMessage() ] );
 		}
 	}
 
@@ -379,7 +377,7 @@ class Admin {
 
 	/* ================================================================== downloads */
 
-	public static function download() {
+	public static function download(): void {
 		if ( ! self::can() ) {
 			wp_die( 'Not allowed.' );
 		}
@@ -395,14 +393,14 @@ class Admin {
 				case 'archive':
 				case 'orphans':
 					$defs = $engine->site->active_defs();
-					$name = isset( $g['table'] ) ? $g['table'] : '';
+					$name = $g['table'] ?? '';
 					if ( ! isset( $defs[ $name ] ) ) {
 						throw new \RuntimeException( 'Unknown table.' );
 					}
 					$table = $engine->site->prefixed( $name );
 					if ( $type === 'archive' ) {
 						self::headers( "site-$blog-$table.jsonl", 'application/x-ndjson' );
-						$engine->each_table_row( $name, function ( $row ) {
+						$engine->each_table_row( $name, function ( $row ): void {
 							echo wp_json_encode( $row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ), "\n";
 						} );
 					} else {
@@ -410,13 +408,13 @@ class Admin {
 						self::headers( "site-$blog-$table-orphan-columns.csv", 'text/csv' );
 						$out = fopen( 'php://output', 'w' );
 						fputcsv( $out, array_merge( [ 'post_id' ], $orphans ) );
-						$engine->each_table_row( $name, function ( $row ) use ( $out, $orphans ) {
+						$engine->each_table_row( $name, function ( $row ) use ( $out, $orphans ): void {
 							$vals = [];
 							$any  = false;
 							foreach ( $orphans as $c ) {
-								$v      = isset( $row[ $c ] ) ? $row[ $c ] : '';
+								$v      = $row[ $c ] ?? '';
 								$vals[] = $v;
-								$any    = $any || ( $v !== null && $v !== '' && $v !== '[]' );
+								$any    = $any || ( !in_array($v, [null, '', '[]'], true) );
 							}
 							if ( $any ) {
 								fputcsv( $out, array_merge( [ $row['post_id'] ], $vals ) );
@@ -443,7 +441,7 @@ class Admin {
 					exit;
 
 				case 'compare':
-					$ignore = array_filter( array_map( 'trim', explode( ',', isset( $g['ignore'] ) ? $g['ignore'] : '' ) ) );
+					$ignore = array_filter( array_map( trim(...), explode( ',', $g['ignore'] ?? '' ) ) );
 					$res    = $engine->compare( $g['a'], $g['b'], $ignore );
 					self::headers( "site-$blog-compare-{$g['a']}__vs__{$g['b']}.jsonl", 'application/x-ndjson' );
 					echo Normalizer::json( [ 'summary' => $res['summary'] ] ), "\n";
@@ -453,12 +451,12 @@ class Admin {
 					exit;
 			}
 			throw new \RuntimeException( 'Unknown download.' );
-		} catch ( \Throwable $e ) {
-			wp_die( esc_html( $e->getMessage() ) );
+		} catch ( \Throwable $throwable ) {
+			wp_die( esc_html( $throwable->getMessage() ) );
 		}
 	}
 
-	private static function headers( $filename, $type ) {
+	private static function headers( string $filename, string $type ): void {
 		nocache_headers();
 		header( 'Content-Type: ' . $type . '; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $filename ) . '"' );
@@ -467,7 +465,7 @@ class Admin {
 
 	/* ================================================================== assets */
 
-	private static function styles() {
+	private static function styles(): void {
 		?>
 		<style>
 			.acfm .acfm-box{background:#fff;border:1px solid #c3c4c7;padding:4px 16px 12px;margin:16px 0;max-width:1400px}
@@ -487,7 +485,7 @@ class Admin {
 		<?php
 	}
 
-	private static function script() {
+	private static function script(): void {
 		$cfg = [
 			'ajax'  => admin_url( 'admin-ajax.php' ),
 			'nonce' => wp_create_nonce( self::NONCE ),

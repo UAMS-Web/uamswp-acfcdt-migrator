@@ -1,4 +1,7 @@
 <?php
+use UAMSWP_ACFCDT_Migrator\Command;
+use UAMSWP_ACFCDT_Migrator\Admin;
+
 /**
  * Plugin Name: UAMSWP ACF Custom Database Tables Migrator
  * Description: Moves ACF values out of ACF Custom Database Tables into core postmeta with snapshot, verify and rollback. Use it from Tools → ACFCDT Migration (no WP-CLI needed) or via WP-CLI. Does nothing on the front end.
@@ -13,6 +16,7 @@
 if ( defined( 'UAMSWP_ACFCDT_MIGRATOR_FILE' ) ) {
 	return;
 }
+
 define( 'UAMSWP_ACFCDT_MIGRATOR_FILE', __FILE__ );
 define( 'UAMSWP_ACFCDT_MIGRATOR_VERSION', '0.2.2' );
 
@@ -24,13 +28,13 @@ require_once __DIR__ . '/includes/class-engine.php';
 
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 	require_once __DIR__ . '/includes/class-command.php';
-	\WP_CLI::add_command( 'acfcdt-migrate', 'UAMSWP_ACFCDT_Migrator\\Command' );
+	\WP_CLI::add_command( 'acfcdt-migrate', Command::class );
 }
 
 // Admin screens (only when loaded as a normal plugin; `wp --require` runs before WordPress's hook API exists).
 if ( function_exists( 'add_action' ) && function_exists( 'is_admin' ) ) {
 	require_once __DIR__ . '/includes/class-admin.php';
 	if ( is_admin() ) {
-		\UAMSWP_ACFCDT_Migrator\Admin::init();
+		Admin::init();
 	}
 }

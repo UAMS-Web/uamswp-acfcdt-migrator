@@ -27,18 +27,21 @@ class Normalizer {
 	 *
 	 * @return mixed|null
 	 */
-	public static function value( array $field, $v ) {
-		$type = isset( $field['type'] ) ? $field['type'] : '';
+	public static function value( array $field, $v ): string|array|null {
+		$type = $field['type'] ?? '';
 
-		if ( $v === null || $v === '' || $v === [] ) {
+		if ( in_array($v, [null, '', []], true) ) {
 			return null;
 		}
+
 		if ( $v === false ) {
 			return $type === 'true_false' ? '0' : null;
 		}
+
 		if ( $v === true ) {
 			return '1';
 		}
+
 		if ( is_object( $v ) ) {
 			$v = json_decode( wp_json_encode( $v ), true );
 		}
@@ -52,9 +55,11 @@ class Normalizer {
 				if ( $n === null || $n === '0' ) {
 					continue;
 				}
+
 				$out[] = $n;
 			}
-			if ( ! $out ) {
+
+			if ( $out === [] ) {
 				return null;
 			}
 
@@ -83,15 +88,16 @@ class Normalizer {
 
 			case 'flexible_content':
 				$layouts = [];
-				foreach ( (array) ( isset( $field['layouts'] ) ? $field['layouts'] : [] ) as $layout ) {
+				foreach ( (array) ( $field['layouts'] ?? [] ) as $layout ) {
 					if ( isset( $layout['name'] ) ) {
 						$layouts[ $layout['name'] ] = isset( $layout['sub_fields'] ) ? (array) $layout['sub_fields'] : [];
 					}
 				}
+
 				$out = [];
 				foreach ( $v as $row ) {
 					$name  = is_array( $row ) && isset( $row['acf_fc_layout'] ) ? $row['acf_fc_layout'] : '';
-					$subs  = isset( $layouts[ $name ] ) ? $layouts[ $name ] : [];
+					$subs  = $layouts[ $name ] ?? [];
 					$norm  = self::row( $subs, $row );
 					$out[] = is_array( $norm ) ? $norm + [ 'acf_fc_layout' => $name ] : $norm;
 				}
@@ -114,16 +120,18 @@ class Normalizer {
 	}
 
 	/** Normalize one repeater/group row: map keys (field_xxx or name) to names, drop empties, sort. */
-	private static function row( array $subs, $row ) {
+	private static function row( array $subs, $row ): string|array|null {
 		if ( ! is_array( $row ) ) {
 			return self::generic( $row );
 		}
+
 		$by_key  = [];
 		$by_name = [];
 		foreach ( $subs as $sub ) {
 			if ( isset( $sub['key'] ) ) {
 				$by_key[ $sub['key'] ] = $sub;
 			}
+
 			if ( isset( $sub['name'] ) && $sub['name'] !== '' ) {
 				$by_name[ $sub['name'] ] = $sub;
 			}
@@ -134,7 +142,8 @@ class Normalizer {
 			if ( $k === 'acf_fc_layout' ) {
 				continue;
 			}
-			$sub = isset( $by_key[ $k ] ) ? $by_key[ $k ] : ( isset( $by_name[ $k ] ) ? $by_name[ $k ] : null );
+
+			$sub = $by_key[ $k ] ?? $by_name[ $k ] ?? null;
 			if ( $sub ) {
 				$name = $sub['name'];
 				$norm = self::value( $sub, $val );
@@ -142,25 +151,30 @@ class Normalizer {
 				$name = (string) $k;
 				$norm = self::generic( $val );
 			}
+
 			if ( $norm !== null ) {
 				$out[ $name ] = $norm;
 			}
 		}
+
 		ksort( $out );
 
 		return $out; // an all-empty row stays [] (row count still matters)
 	}
 
-	public static function generic( $v ) {
-		if ( $v === null || $v === '' || $v === [] || $v === false ) {
+	public static function generic( $v ): string|array|null {
+		if ( in_array($v, [null, '', [], false], true) ) {
 			return null;
 		}
+
 		if ( $v === true ) {
 			return '1';
 		}
+
 		if ( is_object( $v ) ) {
 			$v = json_decode( wp_json_encode( $v ), true );
 		}
+
 		if ( ! is_array( $v ) ) {
 			return (string) $v;
 		}
@@ -181,12 +195,13 @@ class Normalizer {
 				$out[ (string) $k ] = $n;
 			}
 		}
+
 		ksort( $out );
 
 		return $out ?: null;
 	}
 
-	private static function is_list( array $a ) {
+	private static function is_list( array $a ): bool {
 		$i = 0;
 		foreach ( $a as $k => $_ ) {
 			if ( $k !== $i ++ ) {
@@ -202,7 +217,7 @@ class Normalizer {
 		return wp_json_encode( $normalized, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 	}
 
-	public static function same( $a, $b ) {
+	public static function same( $a, $b ): bool {
 		return self::json( $a ) === self::json( $b );
 	}
 
@@ -210,10 +225,11 @@ class Normalizer {
 	 * True if an ID field holds something that isn't an ID (e.g. a corrupted string like "10522]").
 	 * Those are reported for manual review instead of being written.
 	 */
-	public static function has_invalid_ids( array $field, $normalized ) {
-		if ( $normalized === null || ! in_array( isset( $field['type'] ) ? $field['type'] : '', self::ID_TYPES, true ) ) {
+	public static function has_invalid_ids( array $field, $normalized ): bool {
+		if ( $normalized === null || ! in_array( $field['type'] ?? '', self::ID_TYPES, true ) ) {
 			return false;
 		}
+
 		foreach ( is_array( $normalized ) ? $normalized : [ $normalized ] as $id ) {
 			if ( ! is_string( $id ) || ! ctype_digit( $id ) ) {
 				return true;
@@ -223,7 +239,7 @@ class Normalizer {
 		return false;
 	}
 
-	public static function is_complex( array $field ) {
-		return in_array( isset( $field['type'] ) ? $field['type'] : '', self::COMPLEX, true );
+	public static function is_complex( array $field ): bool {
+		return in_array( $field['type'] ?? '', self::COMPLEX, true );
 	}
 }

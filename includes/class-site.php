@@ -12,16 +12,17 @@ class Site {
 	const SKIP_TYPES = [ 'tab', 'message', 'accordion' ];
 
 	public $blog_id;
+
 	public $url;
 
-	private $json_dir_override;
-	private $defs;
-	private $field_cache = [];
 
-	public function __construct( $json_dir_override = null ) {
+	private ?array $defs = null;
+
+	private array $field_cache = [];
+
+	public function __construct( private $json_dir_override = null ) {
 		$this->blog_id           = get_current_blog_id();
 		$this->url               = home_url( '/' );
-		$this->json_dir_override = $json_dir_override;
 	}
 
 	/* ------------------------------------------------------------------ table definitions */
@@ -30,9 +31,11 @@ class Site {
 		if ( $this->json_dir_override ) {
 			return untrailingslashit( $this->json_dir_override );
 		}
+
 		if ( defined( 'ACFCDT_JSON_DIR' ) ) {
 			return untrailingslashit( ACFCDT_JSON_DIR );
 		}
+
 		if ( function_exists( 'acf_get_setting' ) && acf_get_setting( 'save_json' ) ) {
 			return untrailingslashit( acf_get_setting( 'save_json' ) ) . '/database-tables';
 		}
@@ -45,27 +48,31 @@ class Site {
 	 *
 	 * @return array name => [name, post_type, file, columns => [[name, identifier]]]
 	 */
-	public function table_defs() {
+	public function table_defs(): array {
 		if ( $this->defs !== null ) {
 			return $this->defs;
 		}
+
 		$this->defs = [];
 		foreach ( (array) glob( $this->json_dir() . '/*.json' ) as $file ) {
 			$def = json_decode( (string) file_get_contents( $file ), true );
 			if ( ! is_array( $def ) || empty( $def['name'] ) ) {
 				continue;
 			}
-			$rel = isset( $def['relationship'] ) ? $def['relationship'] : [];
-			if ( ( isset( $rel['type'] ) ? $rel['type'] : '' ) !== 'post' || empty( $rel['post_type'] ) ) {
+
+			$rel = $def['relationship'] ?? [];
+			if ( ( $rel['type'] ?? '' ) !== 'post' || empty( $rel['post_type'] ) ) {
 				continue;
 			}
+
 			$columns = [];
-			foreach ( (array) ( isset( $def['columns'] ) ? $def['columns'] : [] ) as $col ) {
+			foreach ( (array) ( $def['columns'] ?? [] ) as $col ) {
 				$columns[] = [
-					'name'       => isset( $col['name'] ) ? $col['name'] : '',
-					'identifier' => isset( $col['map']['identifier'] ) ? $col['map']['identifier'] : '',
+					'name'       => $col['name'] ?? '',
+					'identifier' => $col['map']['identifier'] ?? '',
 				];
 			}
+
 			$this->defs[ $def['name'] ] = [
 				'name'      => $def['name'],
 				'post_type' => $rel['post_type'],
@@ -77,13 +84,13 @@ class Site {
 		return $this->defs;
 	}
 
-	public function prefixed( $table ) {
+	public function prefixed( $table ): string {
 		global $wpdb;
 
 		return $wpdb->prefix . $table;
 	}
 
-	public function table_exists( $table ) {
+	public function table_exists( $table ): bool {
 		global $wpdb;
 		$full = $this->prefixed( $table );
 
@@ -91,10 +98,8 @@ class Site {
 	}
 
 	/** Table defs whose table actually exists on this site. */
-	public function active_defs() {
-		return array_filter( $this->table_defs(), function ( $def ) {
-			return $this->table_exists( $def['name'] );
-		} );
+	public function active_defs(): array {
+		return array_filter( $this->table_defs(), fn(array $def): bool => $this->table_exists( $def['name'] ) );
 	}
 
 	/**
@@ -108,15 +113,15 @@ class Site {
 	 *
 	 * @return array table name => [cache_post_type, intercepting, not_cached[]]; [] if there is no cache file.
 	 */
-	public function cache_status() {
+	public function cache_status(): array {
 		$file = $this->json_dir() . '/.cache/_table_map.php';
 		if ( ! is_file( $file ) ) {
 			return [ '_missing' => $file ];
 		}
-		$map = ( static function ( $f ) {
-			return include $f;
-		} )( $file );
+
+		$map = ( static fn($f) => include $f )( $file );
 		$map = is_array( $map ) ? $map : [];
+
 		$out = [];
 		foreach ( $this->table_defs() as $name => $def ) {
 			$ctx    = 'post:' . $def['post_type'];
@@ -127,8 +132,9 @@ class Site {
 					$not[] = $col['identifier'];
 				}
 			}
+
 			$out[ $name ] = [
-				'cache_post_type' => isset( $map['tables'][ $name ]['relationship']['post_type'] ) ? $map['tables'][ $name ]['relationship']['post_type'] : null,
+				'cache_post_type' => $map['tables'][ $name ]['relationship']['post_type'] ?? null,
 				'intercepting'    => isset( $map['post_types'][ $def['post_type'] ] ),
 				'not_cached'      => $not,
 			];
@@ -137,12 +143,16 @@ class Site {
 		return $out;
 	}
 
-	/** Human-readable problems that mean the plugin is NOT serving a table's data right now. */
-	public function cache_problems() {
+	/**
+     * Human-readable problems that mean the plugin is NOT serving a table's data right now.
+     * @return string[]
+     */
+    public function cache_problems(): array {
 		$status = $this->cache_status();
 		if ( isset( $status['_missing'] ) ) {
 			return [ "No table map cache at {$status['_missing']} — the plugin is not reading any custom table. Run Create/Update Tables first." ];
 		}
+
 		$problems = [];
 		foreach ( $this->active_defs() as $name => $def ) {
 			if ( empty( $status[ $name ]['intercepting'] ) ) {
@@ -156,10 +166,8 @@ class Site {
 		return $problems;
 	}
 
-	public function post_types() {
-		return array_values( array_unique( array_map( function ( $d ) {
-			return $d['post_type'];
-		}, $this->active_defs() ) ) );
+	public function post_types(): array {
+		return array_values( array_unique( array_map( fn(array $d) => $d['post_type'], $this->active_defs() ) ) );
 	}
 
 	/* ------------------------------------------------------------------ posts & fields */
@@ -171,9 +179,10 @@ class Site {
 	 */
 	public function posts( array $types, $ids = null, $limit = 0 ) {
 		global $wpdb;
-		if ( ! $types ) {
+		if ( $types === [] ) {
 			return [];
 		}
+
 		$in  = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 		$sql = $wpdb->prepare(
 			"SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
@@ -181,9 +190,10 @@ class Site {
 			$types
 		);
 		if ( $ids ) {
-			$ids = array_filter( array_map( 'absint', (array) $ids ) );
+			$ids = array_filter( array_map( absint(...), (array) $ids ) );
 			$sql .= ' AND ID IN (' . implode( ',', $ids ?: [ 0 ] ) . ')';
 		}
+
 		$sql .= ' ORDER BY ID ASC';
 		if ( $limit ) {
 			$sql .= ' LIMIT ' . absint( $limit );
@@ -206,6 +216,7 @@ class Site {
 				$keys[ $g['key'] ] = $g;
 			}
 		}
+
 		ksort( $keys );
 		$sig = $post_type . '|' . implode( ',', array_keys( $keys ) );
 
@@ -216,11 +227,11 @@ class Site {
 					if ( empty( $field['name'] ) || in_array( $field['type'], self::SKIP_TYPES, true ) ) {
 						continue;
 					}
-					if ( ! isset( $fields[ $field['name'] ] ) ) {
-						$fields[ $field['name'] ] = $field;
-					}
+
+                    $fields[ $field['name'] ] ??= $field;
 				}
 			}
+
 			ksort( $fields );
 			$this->field_cache[ $sig ] = $fields;
 		}
@@ -235,7 +246,7 @@ class Site {
 	 */
 	public function meta_rows_for_field( $post_id, $name, $complex ) {
 		global $wpdb;
-		list( $where, $params ) = $this->meta_where( $name, $complex );
+		[$where, $params] = $this->meta_where( $name, $complex );
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
@@ -248,7 +259,7 @@ class Site {
 
 	public function delete_meta_rows_for_field( $post_id, $name, $complex ) {
 		global $wpdb;
-		list( $where, $params ) = $this->meta_where( $name, $complex );
+		[$where, $params] = $this->meta_where( $name, $complex );
 
 		return $wpdb->query(
 			$wpdb->prepare(
@@ -259,7 +270,7 @@ class Site {
 	}
 
 	/** @return array [sql fragment with placeholders, params] */
-	private function meta_where( $name, $complex ) {
+	private function meta_where( $name, $complex ): array {
 		global $wpdb;
 		$sql    = '(meta_key = %s OR meta_key = %s';
 		$params = [ $name, '_' . $name ];
@@ -279,7 +290,7 @@ class Site {
 	 * Base output dir. Defaults to one level ABOVE the web root so snapshots/backups are not web-accessible;
 	 * falls back to wp-content if that isn't writable. Override with --dir or ACFCDT_MIGRATION_DIR.
 	 */
-	public static function out_dir( $override = null, $sub = '' ) {
+	public static function out_dir( $override = null, $sub = '' ): string {
 		if ( $override ) {
 			$base = $override;
 		} elseif ( defined( 'ACFCDT_MIGRATION_DIR' ) ) {
@@ -288,6 +299,7 @@ class Site {
 			$parent = dirname( untrailingslashit( ABSPATH ) );
 			$base   = is_writable( $parent ) ? $parent . '/acfcdt-migration' : WP_CONTENT_DIR . '/acfcdt-migration';
 		}
+
 		$dir = untrailingslashit( $base ) . ( $sub ? '/' . trim( $sub, '/' ) : '' );
 		if ( ! is_dir( $dir ) && ! wp_mkdir_p( $dir ) ) {
 			\WP_CLI::error( "Cannot create output directory: $dir" );

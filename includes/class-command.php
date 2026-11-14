@@ -2,6 +2,13 @@
 
 namespace UAMSWP_ACFCDT_Migrator;
 
+use function WP_CLI\Utils\get_flag_value;
+use function WP_CLI\Utils\format_items;
+use function WP_CLI\Utils\make_progress_bar;
+use function WP_CLI\Utils\wp_clear_object_cache;
+use function WP_CLI\Utils\get_home_dir;
+use function WP_CLI\Utils\get_php_binary;
+use function WP_CLI\Utils\assoc_args_to_str;
 use WP_CLI;
 use WP_CLI\Utils;
 
@@ -35,13 +42,14 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function inventory( $args, $assoc ) {
+	public function inventory( $args, $assoc ): void {
 		if ( $this->maybe_network( 'inventory', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$inv    = $engine->inventory();
-		$format = Utils\get_flag_value( $assoc, 'format', 'table' );
+		$format = get_flag_value( $assoc, 'format', 'table' );
 
 		$this->site_header( $engine->site );
 		WP_CLI::log( 'Table JSON dir:          ' . $inv['json_dir'] );
@@ -52,10 +60,12 @@ class Command {
 			if ( $name === '_missing' ) {
 				continue;
 			}
+
 			WP_CLI::log( sprintf( 'Table map cache for %s: post type "%s" — %s%s', $name, $cs['cache_post_type'] ?: '(none)',
 				$cs['intercepting'] ? 'plugin IS reading this table' : 'plugin is NOT reading this table',
 				$cs['intercepting'] && $cs['not_cached'] ? '; ' . count( $cs['not_cached'] ) . ' mapped column(s) not in cache (served from postmeta)' : '' ) );
 		}
+
 		foreach ( $inv['cache_problems'] as $problem ) {
 			WP_CLI::warning( $problem );
 		}
@@ -67,14 +77,17 @@ class Command {
 				WP_CLI::log( '   table does not exist on this site' );
 				continue;
 			}
+
 			WP_CLI::log( "   rows: {$t['rows']} | rows whose post no longer exists: {$t['missing_post']} | rows for other post types/revisions: {$t['wrong_type']} | {$t['post_type']} posts with no row: {$t['no_row']}" );
 			if ( $t['extra_cols'] ) {
 				WP_CLI::log( '   columns in DB but not in JSON: ' . implode( ', ', $t['extra_cols'] ) );
 			}
+
 			if ( $t['missing_cols'] ) {
 				WP_CLI::warning( '   columns in JSON but missing from DB: ' . implode( ', ', $t['missing_cols'] ) );
 			}
-			Utils\format_items( $format, $t['columns'], [ 'column', 'acf_name', 'acf_type', 'non_empty', 'note' ] );
+
+			format_items( $format, $t['columns'], [ 'column', 'acf_name', 'acf_type', 'non_empty', 'note' ] );
 		}
 	}
 
@@ -101,16 +114,16 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function archive( $args, $assoc ) {
-		if ( ! isset( $assoc['stamp'] ) ) {
-			$assoc['stamp'] = gmdate( 'Ymd-His' );
-		}
-		if ( $this->maybe_network( 'archive', $args, $assoc ) ) {
+	public function archive( $args, $assoc ): void {
+		$assoc['stamp'] ??= gmdate( 'Ymd-His' );
+
+        if ( $this->maybe_network( 'archive', $args, $assoc ) ) {
 			return;
 		}
+
 		global $wpdb;
-		$site = new Site( Utils\get_flag_value( $assoc, 'json-dir' ) );
-		$dir  = Site::out_dir( Utils\get_flag_value( $assoc, 'dir' ), 'archive/' . sanitize_file_name( $assoc['stamp'] ) );
+		$site = new Site( get_flag_value( $assoc, 'json-dir' ) );
+		$dir  = Site::out_dir( get_flag_value( $assoc, 'dir' ), 'archive/' . sanitize_file_name( $assoc['stamp'] ) );
 		$this->site_header( $site );
 
 		$manifest = [];
@@ -131,8 +144,10 @@ class Command {
 					$count ++;
 					$last = $has_id ? (int) $row['id'] : $last;
 				}
+
 				$offset += 500;
 			} while ( count( $batch ) === 500 );
+
 			fclose( $fh );
 
 			// Orphaned columns: mapped identifier has no ACF field, or column not in JSON at all.
@@ -143,19 +158,19 @@ class Command {
 				if ( in_array( $col, [ 'id', 'post_id' ], true ) ) {
 					continue;
 				}
-				$ident = isset( $def_cols[ $col ] ) ? $def_cols[ $col ] : '';
+
+				$ident = $def_cols[ $col ] ?? '';
 				if ( ! $ident || ! acf_get_field( $ident ) ) {
 					$orphans[] = $col;
 				}
 			}
+
 			$orphan_file = '';
-			if ( $orphans ) {
+			if ( $orphans !== [] ) {
 				$orphan_file = "$dir/site-{$site->blog_id}-{$table}-orphan-columns.csv";
 				$cols        = array_merge( [ 'post_id' ], $orphans );
-				$quoted      = implode( ',', array_map( function ( $c ) {
-					return '`' . esc_sql( $c ) . '`';
-				}, $cols ) );
-				$where       = implode( ' OR ', array_map( function ( $c ) {
+				$quoted      = implode( ',', array_map( fn($c): string => '`' . esc_sql( $c ) . '`', $cols ) );
+				$where       = implode( ' OR ', array_map( function ( $c ): string {
 					$c = esc_sql( $c );
 
 					return "(`$c` IS NOT NULL AND `$c` <> '' AND `$c` <> '[]')";
@@ -166,6 +181,7 @@ class Command {
 				foreach ( $rows as $r ) {
 					fputcsv( $oh, $r );
 				}
+
 				fclose( $oh );
 				WP_CLI::log( sprintf( '   %s: orphaned columns [%s] — %d rows with data → %s', $table, implode( ', ', $orphans ), count( $rows ), basename( $orphan_file ) ) );
 			}
@@ -186,9 +202,10 @@ class Command {
 			'tables'  => $manifest,
 		], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
 
-		if ( $manifest ) {
+		if ( $manifest !== [] ) {
 			WP_CLI::log( '   Also take a SQL dump of these tables: wp db export --tables=' . implode( ',', array_column( $manifest, 'table' ) ) . ' acfcdt-site-' . $site->blog_id . '.sql' );
 		}
+
 		WP_CLI::success( "Archived site {$site->blog_id}." );
 	}
 
@@ -220,20 +237,22 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function snapshot( $args, $assoc ) {
+	public function snapshot( $args, $assoc ): void {
 		if ( $this->maybe_network( 'snapshot', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$this->site_header( $engine->site );
 		try {
-			$label = $engine->snapshot_start( $args[0], Utils\get_flag_value( $assoc, 'mode', 'effective' ), (bool) Utils\get_flag_value( $assoc, 'force' ) );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
+			$label = $engine->snapshot_start( $args[0], get_flag_value( $assoc, 'mode', 'effective' ), (bool) get_flag_value( $assoc, 'force' ) );
+		} catch ( \Exception $exception ) {
+			WP_CLI::error( $exception->getMessage() );
 		}
+
 		$ids    = $this->ids( $assoc );
 		$total  = $engine->total_posts( $ids );
-		$bar    = Utils\make_progress_bar( "Snapshot '$label' – $total posts", $total );
+		$bar    = make_progress_bar( "Snapshot '$label' – $total posts", $total );
 		$cursor = 0;
 		$values = 0;
 		do {
@@ -243,8 +262,10 @@ class Command {
 			for ( $i = 0; $i < $r['processed']; $i ++ ) {
 				$bar->tick();
 			}
-			Utils\wp_clear_object_cache();
+
+			wp_clear_object_cache();
 		} while ( ! $r['done'] );
+
 		$bar->finish();
 		WP_CLI::success( sprintf( 'Site %d: snapshot "%s" — %d posts, %d non-empty values.', $engine->site->blog_id, $label, $total, $values ) );
 	}
@@ -273,30 +294,34 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function compare( $args, $assoc ) {
+	public function compare( $args, $assoc ): void {
 		if ( $this->maybe_network( 'compare', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$this->site_header( $engine->site );
-		$ignore = array_filter( array_map( 'trim', explode( ',', (string) Utils\get_flag_value( $assoc, 'ignore-fields', '' ) ) ) );
+		$ignore = array_filter( array_map( trim(...), explode( ',', (string) get_flag_value( $assoc, 'ignore-fields', '' ) ) ) );
 		try {
 			$res = $engine->compare( $args[0], $args[1], $ignore );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
+		} catch ( \Exception $exception ) {
+			WP_CLI::error( $exception->getMessage() );
 		}
-		foreach ( array_slice( $res['diffs'], 0, (int) Utils\get_flag_value( $assoc, 'limit', 25 ) ) as $d ) {
+
+		foreach ( array_slice( $res['diffs'], 0, (int) get_flag_value( $assoc, 'limit', 25 ) ) as $d ) {
 			WP_CLI::log( sprintf( 'post %d "%s" field %s', $d['post_id'], $d['title'], $d['field'] ) );
 			WP_CLI::log( "    {$args[0]}: " . $this->preview( $d['a'] ) );
 			WP_CLI::log( "    {$args[1]}: " . $this->preview( $d['b'] ) );
 		}
+
 		$s = $res['summary'];
 		unset( $s['identical'] );
-		Utils\format_items( 'table', [ $s ], array_keys( $s ) );
+		format_items( 'table', [ $s ], array_keys( $s ) );
 		if ( $res['diffs'] ) {
 			WP_CLI::warning( count( $res['diffs'] ) . " difference(s) between '{$args[0]}' and '{$args[1]}'." );
 			WP_CLI::halt( 1 );
 		}
+
 		WP_CLI::success( "'{$args[0]}' and '{$args[1]}' are identical." );
 	}
 
@@ -330,24 +355,25 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function backfill( $args, $assoc ) {
-		if ( ! isset( $assoc['stamp'] ) ) {
-			$assoc['stamp'] = gmdate( 'Ymd-His' ) . ( Utils\get_flag_value( $assoc, 'dry-run' ) ? '-dry' : '' );
-		}
-		if ( $this->maybe_network( 'backfill', $args, $assoc ) ) {
+	public function backfill( $args, $assoc ): void {
+		$assoc['stamp'] ??= gmdate( 'Ymd-His' ) . ( get_flag_value( $assoc, 'dry-run' ) ? '-dry' : '' );
+
+        if ( $this->maybe_network( 'backfill', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$this->site_header( $engine->site );
-		$dry = (bool) Utils\get_flag_value( $assoc, 'dry-run' );
+		$dry = (bool) get_flag_value( $assoc, 'dry-run' );
 		try {
-			$stamp = $engine->backfill_start( $dry, (bool) Utils\get_flag_value( $assoc, 'no-clear' ), $assoc['stamp'], (bool) Utils\get_flag_value( $assoc, 'allow-stale-cache' ) );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
+			$stamp = $engine->backfill_start( $dry, (bool) get_flag_value( $assoc, 'no-clear' ), $assoc['stamp'], (bool) get_flag_value( $assoc, 'allow-stale-cache' ) );
+		} catch ( \Exception $exception ) {
+			WP_CLI::error( $exception->getMessage() );
 		}
+
 		$ids    = $this->ids( $assoc );
 		$total  = $engine->total_posts( $ids );
-		$bar    = Utils\make_progress_bar( ( $dry ? '[DRY RUN] ' : '' ) . "Backfill – $total posts", $total );
+		$bar    = make_progress_bar( ( $dry ? '[DRY RUN] ' : '' ) . "Backfill – $total posts", $total );
 		$cursor = 0;
 		do {
 			$r      = $engine->backfill_batch( $stamp, $cursor, 20, $ids );
@@ -355,22 +381,27 @@ class Command {
 			foreach ( $r['warnings'] as $w ) {
 				WP_CLI::warning( $w );
 			}
+
 			for ( $i = 0; $i < $r['processed']; $i ++ ) {
 				$bar->tick();
 			}
-			Utils\wp_clear_object_cache();
+
+			wp_clear_object_cache();
 		} while ( ! $r['done'] );
+
 		$bar->finish();
 
 		$sum = Store::change_summary( $stamp );
 		if ( $sum['by_field'] ) {
-			Utils\format_items( 'table', $sum['by_field'], [ 'field', 'fill', 'overwrite', 'clear' ] );
+			format_items( 'table', $sum['by_field'], [ 'field', 'fill', 'overwrite', 'clear' ] );
 		}
+
 		WP_CLI::log( 'Stats: ' . wp_json_encode( $sum['stats'] ) );
 		if ( $sum['stats']['write_mismatch'] ) {
 			WP_CLI::warning( "{$sum['stats']['write_mismatch']} write mismatch(es) — inspect the changes for run $stamp." );
 			WP_CLI::halt( 1 );
 		}
+
 		WP_CLI::success( ( $dry ? '[DRY RUN] ' : '' ) . "Site {$engine->site->blog_id}: run $stamp — {$sum['stats']['posts']} posts / {$sum['stats']['fields']} fields " . ( $dry ? 'would change.' : 'backfilled.' ) );
 	}
 
@@ -392,10 +423,11 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function rollback( $args, $assoc ) {
+	public function rollback( $args, $assoc ): void {
 		if ( $this->maybe_network( 'rollback', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$this->site_header( $engine->site );
 		if ( Store::get( 'run', $args[0] ) === null ) {
@@ -403,11 +435,13 @@ class Command {
 
 			return;
 		}
+
 		try {
-			$stamp = $engine->rollback_start( $args[0], (bool) Utils\get_flag_value( $assoc, 'force' ) );
-		} catch ( \Exception $e ) {
-			WP_CLI::error( $e->getMessage() );
+			$stamp = $engine->rollback_start( $args[0], (bool) get_flag_value( $assoc, 'force' ) );
+		} catch ( \Exception $exception ) {
+			WP_CLI::error( $exception->getMessage() );
 		}
+
 		$cursor = 0;
 		$n      = 0;
 		do {
@@ -415,6 +449,7 @@ class Command {
 			$cursor = $r['cursor'];
 			$n     += $r['processed'];
 		} while ( ! $r['done'] );
+
 		WP_CLI::success( "Site {$engine->site->blog_id}: $n field(s) restored from run $stamp." );
 	}
 
@@ -428,22 +463,25 @@ class Command {
 	 *
 	 * @when after_wp_load
 	 */
-	public function status( $args, $assoc ) {
+	public function status( $args, $assoc ): void {
 		if ( $this->maybe_network( 'status', $args, $assoc ) ) {
 			return;
 		}
+
 		$engine = $this->engine( $assoc );
 		$this->site_header( $engine->site );
 		$rows = [];
 		foreach ( Store::headers( 'snapinfo' ) as $ref => $i ) {
-			$rows[] = [ 'type' => 'snapshot', 'name' => $ref, 'detail' => ( isset( $i['mode'] ) ? $i['mode'] : '' ), 'status' => isset( $i['status'] ) ? $i['status'] : '', 'when' => $i['created'] ];
+			$rows[] = [ 'type' => 'snapshot', 'name' => $ref, 'detail' => ( $i['mode'] ?? '' ), 'status' => $i['status'] ?? '', 'when' => $i['created'] ];
 		}
+
 		$rbs = Store::headers( 'rollback' );
 		foreach ( Store::headers( 'run' ) as $ref => $r ) {
-			$st     = isset( $r['stats'] ) ? $r['stats'] : Store::change_summary( $ref )['stats'];
-			$rows[] = [ 'type' => empty( $r['dry'] ) ? 'backfill' : 'dry run', 'name' => $ref, 'detail' => "{$st['fields']} fields, {$st['write_mismatch']} mismatches" . ( isset( $rbs[ $ref ] ) ? ', rollback ' . $rbs[ $ref ]['status'] : '' ), 'status' => isset( $r['status'] ) ? $r['status'] : '', 'when' => $r['created'] ];
+			$st     = $r['stats'] ?? Store::change_summary( $ref )['stats'];
+			$rows[] = [ 'type' => empty( $r['dry'] ) ? 'backfill' : 'dry run', 'name' => $ref, 'detail' => "{$st['fields']} fields, {$st['write_mismatch']} mismatches" . ( isset( $rbs[ $ref ] ) ? ', rollback ' . $rbs[ $ref ]['status'] : '' ), 'status' => $r['status'] ?? '', 'when' => $r['created'] ];
 		}
-		$rows ? Utils\format_items( 'table', $rows, [ 'type', 'name', 'detail', 'status', 'when' ] ) : WP_CLI::log( '   nothing stored yet' );
+
+		$rows !== [] ? format_items( 'table', $rows, [ 'type', 'name', 'detail', 'status', 'when' ] ) : WP_CLI::log( '   nothing stored yet' );
 	}
 
 	/* ================================================================== helpers */
@@ -453,18 +491,20 @@ class Command {
 	 *
 	 * @return bool true if it handled the call
 	 */
-	private function maybe_network( $sub, $args, $assoc ) {
-		if ( ! Utils\get_flag_value( $assoc, 'network' ) ) {
+	private function maybe_network( string $sub, $args, $assoc ): bool {
+		if ( ! get_flag_value( $assoc, 'network' ) ) {
 			return false;
 		}
+
 		if ( ! is_multisite() ) {
 			return false; // just run on the single site
 		}
+
 		unset( $assoc['network'] );
 		global $wpdb;
 
-		$table_names = array_keys( ( new Site( Utils\get_flag_value( $assoc, 'json-dir' ) ) )->table_defs() );
-		if ( ! $table_names ) {
+		$table_names = array_keys( ( new Site( get_flag_value( $assoc, 'json-dir' ) ) )->table_defs() );
+		if ( $table_names === [] ) {
 			WP_CLI::error( 'No table definition JSON files found (is ACFCDT_JSON_DIR defined? try --json-dir).' );
 		}
 
@@ -479,12 +519,15 @@ class Command {
 					break;
 				}
 			}
+
 			if ( ! $has ) {
 				$skipped[] = $s->blog_id;
 				continue;
 			}
+
 			$targets[] = $s;
 		}
+
 		WP_CLI::log( sprintf( 'Network %s: %d site(s) with custom tables; %d without (skipped).', $sub, count( $targets ), count( $skipped ) ) );
 
 		// launch_self() only forwards path/url/user/allow-root, so pass through what the child needs.
@@ -506,10 +549,11 @@ class Command {
 		}
 
 		WP_CLI::log( '' );
-		if ( $failed ) {
+		if ( $failed !== [] ) {
 			WP_CLI::warning( 'Non-zero exit on: ' . implode( ', ', $failed ) );
 			WP_CLI::halt( 1 );
 		}
+
 		WP_CLI::success( "Network $sub finished on " . count( $targets ) . ' site(s).' );
 
 		return true;
@@ -520,24 +564,25 @@ class Command {
 	 *
 	 * @return int exit code
 	 */
-	private function run_child( $command, $args, $assoc, $url ) {
+	private function run_child( string $command, $args, $assoc, string $url ): int {
 		$config = WP_CLI::get_runner()->config;
 		foreach ( [ 'path', 'user', 'allow-root' ] as $key ) {
 			if ( ! empty( $config[ $key ] ) && ! isset( $assoc[ $key ] ) ) {
 				$assoc[ $key ] = $config[ $key ];
 			}
 		}
+
 		$assoc['url'] = $url;
 
-		$config_path = getenv( 'WP_CLI_CONFIG_PATH' ) ?: Utils\get_home_dir() . '/.wp-cli/config.yml';
+		$config_path = getenv( 'WP_CLI_CONFIG_PATH' ) ?: get_home_dir() . '/.wp-cli/config.yml';
 		$cmd         = sprintf(
 			'WP_CLI_CONFIG_PATH=%s %s %s %s %s %s',
 			escapeshellarg( $config_path ),
-			escapeshellarg( Utils\get_php_binary() ),
+			escapeshellarg( get_php_binary() ),
 			escapeshellarg( $GLOBALS['argv'][0] ),
 			$command,
-			implode( ' ', array_map( 'escapeshellarg', $args ) ),
-			Utils\assoc_args_to_str( $assoc )
+			implode( ' ', array_map( escapeshellarg(...), $args ) ),
+			assoc_args_to_str( $assoc )
 		);
 
 		$proc = proc_open( $cmd, [ STDIN, STDOUT, STDERR ], $pipes );
@@ -547,34 +592,28 @@ class Command {
 			return 1;
 		}
 
-		return (int) proc_close( $proc );
+		return proc_close( $proc );
 	}
 
-	private function site_header( Site $site ) {
+	private function site_header( Site $site ): void {
 		WP_CLI::log( '' );
 		WP_CLI::log( WP_CLI::colorize( "%Y### Site {$site->blog_id}: {$site->url}%n" ) );
 	}
 
-	private function engine( $assoc ) {
+	private function engine( $assoc ): Engine {
 		if ( ! Engine::acf_ready() ) {
 			WP_CLI::error( 'ACF is not loaded.' );
 		}
 
-		return new Engine( new Site( Utils\get_flag_value( $assoc, 'json-dir' ) ) );
-	}
-
-	private function require_acf() {
-		if ( ! function_exists( 'acf_get_value' ) || ! function_exists( 'acf_get_field_groups' ) ) {
-			WP_CLI::error( 'ACF is not loaded.' );
-		}
+		return new Engine( new Site( get_flag_value( $assoc, 'json-dir' ) ) );
 	}
 
 
 
-	private function ids( $assoc ) {
-		$ids = Utils\get_flag_value( $assoc, 'ids' );
+	private function ids( $assoc ): ?array {
+		$ids = get_flag_value( $assoc, 'ids' );
 
-		return $ids ? array_filter( array_map( 'absint', explode( ',', $ids ) ) ) : null;
+		return $ids ? array_filter( array_map( absint(...), explode( ',', $ids ) ) ) : null;
 	}
 
 

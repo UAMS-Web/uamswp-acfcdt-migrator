@@ -18,11 +18,11 @@ class Engine {
 		Store::install();
 	}
 
-	public static function acf_ready() {
+	public static function acf_ready(): bool {
 		return function_exists( 'acf_get_value' ) && function_exists( 'acf_get_field_groups' );
 	}
 
-	public static function clean_ref( $ref ) {
+	public static function clean_ref( $ref ): string {
 		$ref = (string) $ref;
 		if ( $ref === '' || ! preg_match( '/^[A-Za-z0-9_.-]{1,60}$/', $ref ) ) {
 			throw new \InvalidArgumentException( "Names may only contain letters, numbers, dot, dash and underscore (max 60): '$ref'" );
@@ -33,17 +33,18 @@ class Engine {
 
 	/* ================================================================== posts */
 
-	public function total_posts( $ids = null ) {
+	public function total_posts( $ids = null ): int {
 		return count( $this->site->posts( $this->site->post_types(), $ids ) );
 	}
 
 	/** How many posts are at or below a cursor (for progress after a resume). */
-	public function posts_upto( $cursor ) {
+	public function posts_upto( $cursor ): int {
 		global $wpdb;
 		$types = $this->site->post_types();
 		if ( ! $types || ! $cursor ) {
 			return 0;
 		}
+
 		$in = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 
 		return (int) $wpdb->get_var( $wpdb->prepare(
@@ -59,6 +60,7 @@ class Engine {
 		if ( ! $types ) {
 			return [];
 		}
+
 		$in  = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 		$sql = $wpdb->prepare(
 			"SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
@@ -66,7 +68,7 @@ class Engine {
 			array_merge( $types, [ (int) $cursor ] )
 		);
 		if ( $ids ) {
-			$sql .= ' AND ID IN (' . implode( ',', array_map( 'absint', $ids ) ) . ')';
+			$sql .= ' AND ID IN (' . implode( ',', array_map( absint(...), $ids ) ) . ')';
 		}
 
 		return $wpdb->get_results( $sql . ' ORDER BY ID ASC LIMIT ' . max( 1, (int) $limit ) );
@@ -74,7 +76,7 @@ class Engine {
 
 	/* ================================================================== inventory */
 
-	public function inventory() {
+	public function inventory(): array {
 		global $wpdb;
 		$guard = new HookGuard();
 		$out   = [
@@ -97,6 +99,7 @@ class Engine {
 				$out['tables'][] = $t;
 				continue;
 			}
+
 			$t['rows']         = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `$table`" );
 			$t['missing_post'] = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `$table` t LEFT JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.ID IS NULL" );
 			$t['wrong_type']   = (int) $wpdb->get_var( $wpdb->prepare(
@@ -115,6 +118,7 @@ class Engine {
 				if ( ! $col['identifier'] || ! in_array( $col['name'], $db_cols, true ) ) {
 					continue;
 				}
+
 				$c         = esc_sql( $col['name'] );
 				$non_empty = (int) $wpdb->get_var(
 					"SELECT COUNT(*) FROM `$table` WHERE `$c` IS NOT NULL AND `$c` NOT IN ('', '[]', '{}', 'null', '\"\"')" );
@@ -122,7 +126,7 @@ class Engine {
 				$note      = '';
 				if ( ! $field ) {
 					$note = 'ORPHAN: no ACF field by this name — archive only';
-				} elseif ( ! empty( $field['parent'] ) && is_string( $field['parent'] ) && strpos( $field['parent'], 'field_' ) === 0 ) {
+				} elseif ( ! empty( $field['parent'] ) && is_string( $field['parent'] ) && str_starts_with($field['parent'], 'field_') ) {
 					$parent = acf_get_field( $field['parent'] );
 					$note   = 'nested inside ' . ( $parent ? $parent['type'] . ' "' . $parent['name'] . '"' : $field['parent'] ) . ' — plugin likely never intercepted it';
 				} elseif ( in_array( $field['type'], [ 'group', 'clone', 'flexible_content' ], true ) ) {
@@ -130,6 +134,7 @@ class Engine {
 				} elseif ( $field['type'] === 'repeater' ) {
 					$note = 'repeater (encoded column)';
 				}
+
 				$t['columns'][] = [
 					'column'    => $col['name'],
 					'acf_name'  => $col['identifier'] . ( $col['identifier'] !== $col['name'] ? ' *' : '' ),
@@ -138,6 +143,7 @@ class Engine {
 					'note'      => $note,
 				];
 			}
+
 			$t['orphans']    = $this->orphan_columns( $def );
 			$out['tables'][] = $t;
 		}
@@ -145,8 +151,11 @@ class Engine {
 		return $out;
 	}
 
-	/** DB columns whose identifier has no ACF field, or that aren't in the JSON at all. */
-	public function orphan_columns( array $def ) {
+	/**
+     * DB columns whose identifier has no ACF field, or that aren't in the JSON at all.
+     * @return mixed[]
+     */
+    public function orphan_columns( array $def ): array {
 		global $wpdb;
 		$table    = $this->site->prefixed( $def['name'] );
 		$def_cols = array_column( $def['columns'], 'identifier', 'name' );
@@ -155,7 +164,8 @@ class Engine {
 			if ( in_array( $col, [ 'id', 'post_id' ], true ) ) {
 				continue;
 			}
-			$ident = isset( $def_cols[ $col ] ) ? $def_cols[ $col ] : '';
+
+			$ident = $def_cols[ $col ] ?? '';
 			if ( ! $ident || ! acf_get_field( $ident ) ) {
 				$orphans[] = $col;
 			}
@@ -171,7 +181,7 @@ class Engine {
 	 *
 	 * @return int rows
 	 */
-	public function each_table_row( $table_name, callable $emit ) {
+	public function each_table_row( $table_name, callable $emit ): int {
 		global $wpdb;
 		$table  = $this->site->prefixed( $table_name );
 		$has_id = in_array( 'id', $wpdb->get_col( "SHOW COLUMNS FROM `$table`" ), true );
@@ -187,6 +197,7 @@ class Engine {
 				$count ++;
 				$last = $has_id ? (int) $row['id'] : $last;
 			}
+
 			$offset += 500;
 		} while ( count( $batch ) === 500 );
 
@@ -195,17 +206,20 @@ class Engine {
 
 	/* ================================================================== snapshot */
 
-	public function snapshot_start( $label, $mode, $overwrite = false ) {
+	public function snapshot_start( $label, $mode, $overwrite = false ): string {
 		$label = self::clean_ref( $label );
 		if ( ! in_array( $mode, self::SNAPSHOT_MODES, true ) ) {
 			throw new \InvalidArgumentException( 'Mode must be effective or meta.' );
 		}
+
 		if ( Store::get( 'snapinfo', $label ) !== null ) {
 			if ( ! $overwrite ) {
 				throw new \RuntimeException( "A snapshot named '$label' already exists on this site." );
 			}
+
 			Store::delete( [ 'snapinfo', 'snapshot' ], $label );
 		}
+
 		$guard = new HookGuard();
 		Store::put( 'snapinfo', $label, 0, '', [
 			'mode'       => $guard->has_intercepts() ? $mode : 'meta (plugin absent)',
@@ -221,13 +235,14 @@ class Engine {
 	}
 
 	/** @return array {processed, cursor, done, values} */
-	public function snapshot_batch( $label, $cursor, $limit = 25, $ids = null ) {
+	public function snapshot_batch( $label, $cursor, $limit = 25, $ids = null ): array {
 		$info = Store::get( 'snapinfo', $label );
 		if ( ! $info ) {
 			throw new \RuntimeException( "Snapshot '$label' was not started." );
 		}
+
 		$guard = new HookGuard();
-		if ( $guard->has_intercepts() && strpos( $info['mode'], 'meta' ) === 0 ) {
+		if ( $guard->has_intercepts() && str_starts_with($info['mode'], 'meta') ) {
 			$guard->detach();
 		}
 
@@ -243,6 +258,7 @@ class Engine {
 					$values ++;
 				}
 			}
+
 			Store::put( 'snapshot', $label, (int) $p->ID, '', [
 				'post_id'     => (int) $p->ID,
 				'post_type'   => $p->post_type,
@@ -252,6 +268,7 @@ class Engine {
 			] );
 			$cursor = (int) $p->ID;
 		}
+
 		$guard->attach();
 
 		$done           = count( $posts ) < $limit;
@@ -273,7 +290,7 @@ class Engine {
 	/**
 	 * @return array {summary, diffs[]}
 	 */
-	public function compare( $a, $b, array $ignore = [] ) {
+	public function compare( $a, $b, array $ignore = [] ): array {
 		$a  = self::clean_ref( $a );
 		$b  = self::clean_ref( $b );
 		$ia = Store::get( 'snapinfo', $a );
@@ -281,11 +298,13 @@ class Engine {
 		if ( ! $ia || ! $ib ) {
 			throw new \RuntimeException( 'Both snapshots must exist on this site.' );
 		}
+
 		foreach ( [ $a => $ia, $b => $ib ] as $ref => $info ) {
-			if ( ( isset( $info['status'] ) ? $info['status'] : '' ) !== 'complete' ) {
+			if ( ( $info['status'] ?? '' ) !== 'complete' ) {
 				throw new \RuntimeException( "Snapshot '$ref' is incomplete — resume or re-run it first." );
 			}
 		}
+
 		$pa = Store::by_post( 'snapshot', $a );
 		$pb = Store::by_post( 'snapshot', $b );
 
@@ -298,6 +317,7 @@ class Engine {
 				$diffs[] = [ 'post_id' => $post_id, 'title' => isset( $pa[ $post_id ] ) ? $pa[ $post_id ]['post_title'] : $pb[ $post_id ]['post_title'], 'field' => '(whole post)', 'a' => $key === 'only_in_a' ? 'present' : null, 'b' => $key === 'only_in_b' ? 'present' : null ];
 				continue;
 			}
+
 			$fa    = $pa[ $post_id ]['fields'];
 			$fb    = $pb[ $post_id ]['fields'];
 			$dirty = false;
@@ -305,19 +325,23 @@ class Engine {
 				if ( in_array( $name, $ignore, true ) ) {
 					continue;
 				}
+
 				$va = isset( $fa[ $name ] ) ? $fa[ $name ]['v'] : null;
 				$vb = isset( $fb[ $name ] ) ? $fb[ $name ]['v'] : null;
 				if ( Normalizer::same( $va, $vb ) ) {
 					continue;
 				}
+
 				$dirty = true;
 				$summary['fields_differ'] ++;
 				$diffs[] = [ 'post_id' => $post_id, 'title' => $pa[ $post_id ]['post_title'], 'field' => $name, 'a' => $va, 'b' => $vb ];
 			}
+
 			if ( $dirty ) {
 				$summary['posts_with_diffs'] ++;
 			}
 		}
+
 		$summary['identical'] = ! $diffs;
 
 		return [ 'summary' => $summary, 'diffs' => $diffs ];
@@ -325,19 +349,22 @@ class Engine {
 
 	/* ================================================================== backfill */
 
-	public function backfill_start( $dry, $no_clear, $stamp = null, $allow_stale_cache = false ) {
+	public function backfill_start( $dry, $no_clear, $stamp = null, $allow_stale_cache = false ): string {
 		$guard = new HookGuard();
 		if ( ! $guard->has_intercepts() ) {
 			throw new \RuntimeException( 'ACF Custom Database Tables intercepts not found — the plugin must be active to backfill from it.' );
 		}
+
 		$problems = $this->site->cache_problems();
 		if ( $problems && ! $allow_stale_cache && ! $dry ) {
 			throw new \RuntimeException( implode( ' ', $problems ) . ' (Override only if you have decided postmeta is the current copy.)' );
 		}
+
 		$stamp = $stamp ? self::clean_ref( $stamp ) : gmdate( 'Ymd-His' ) . ( $dry ? '-dry' : '' );
 		if ( Store::get( 'run', $stamp ) !== null ) {
 			throw new \RuntimeException( "A backfill run '$stamp' already exists on this site." );
 		}
+
 		Store::put( 'run', $stamp, 0, '', [
 			'dry'      => (bool) $dry,
 			'no_clear' => (bool) $no_clear,
@@ -351,11 +378,12 @@ class Engine {
 	}
 
 	/** @return array {processed, cursor, done, written, mismatches, warnings[]} */
-	public function backfill_batch( $stamp, $cursor, $limit = 10, $ids = null ) {
+	public function backfill_batch( $stamp, $cursor, $limit = 10, $ids = null ): array {
 		$run = Store::get( 'run', $stamp );
 		if ( ! $run ) {
 			throw new \RuntimeException( "Backfill run '$stamp' was not started." );
 		}
+
 		$dry      = ! empty( $run['dry'] );
 		$no_clear = ! empty( $run['no_clear'] );
 		$guard    = new HookGuard();
@@ -391,6 +419,7 @@ class Engine {
 				if ( Normalizer::same( $n_eff, $n_meta ) ) {
 					continue;
 				}
+
 				$cat    = $n_meta === null ? 'fill' : ( $n_eff === null ? 'clear' : 'overwrite' );
 				$record = [
 					'post_id'     => $post_id,
@@ -414,6 +443,7 @@ class Engine {
 					if ( ! $dry ) {
 						$record['skipped'] = true;
 					}
+
 					Store::put( 'change', $stamp, $post_id, $name, $record );
 					continue;
 				}
@@ -432,7 +462,7 @@ class Engine {
 				// default value, which can differ from the empty value the site serves today.
 				// wp_slash(): update_metadata() runs wp_unslash() on every value, which would strip one level
 				// of backslashes from any content that contains them (e.g. \&quot; inside saved HTML).
-				acf_update_value( wp_slash( $eff[ $name ] === null ? '' : $eff[ $name ] ), $post_id, $field );
+				acf_update_value( wp_slash( $eff[ $name ] ?? '' ), $post_id, $field );
 				$written ++;
 				$changed = true;
 
@@ -445,14 +475,17 @@ class Engine {
 					$record['meta_after']     = $n_after;
 					$warnings[]               = sprintf( 'Post %d field %s: postmeta does not match after write.', $post_id, $name );
 				}
+
 				Store::put( 'change', $stamp, $post_id, $name, $record );
 			}
 
 			if ( $changed ) {
 				clean_post_cache( $post_id );
 			}
+
 			$cursor = $post_id;
 		}
+
 		$guard->attach();
 
 		$done          = count( $posts ) < $limit;
@@ -470,19 +503,22 @@ class Engine {
 
 	/* ================================================================== rollback */
 
-	public function rollback_start( $stamp, $force = false ) {
+	public function rollback_start( $stamp, $force = false ): string {
 		$stamp = self::clean_ref( $stamp );
 		$run   = Store::get( 'run', $stamp );
 		if ( ! $run ) {
 			throw new \RuntimeException( "No backfill run '$stamp' on this site." );
 		}
+
 		if ( ! empty( $run['dry'] ) ) {
 			throw new \RuntimeException( "'$stamp' was a dry run — nothing to roll back." );
 		}
+
 		$rb = Store::get( 'rollback', $stamp );
-		if ( $rb && ( isset( $rb['status'] ) ? $rb['status'] : '' ) === 'complete' && ! $force ) {
+		if ( $rb && ( $rb['status'] ?? '' ) === 'complete' && ! $force ) {
 			throw new \RuntimeException( "Run '$stamp' was already rolled back." );
 		}
+
 		Store::put( 'rollback', $stamp, 0, '', [
 			'status'  => 'running',
 			'started' => gmdate( 'c' ),
@@ -496,7 +532,7 @@ class Engine {
 	 * Restores postmeta from backups, newest first (so overlapping key patterns such as
 	 * location_phone / location_phone_numbers unwind correctly). Cursor is the backup row id.
 	 */
-	public function rollback_batch( $stamp, $cursor, $limit = 100 ) {
+	public function rollback_batch( $stamp, $cursor, $limit = 100 ): array {
 		global $wpdb;
 		$rows  = Store::rows( 'backup', $stamp, (int) $cursor, $limit, true );
 		$posts = [];
@@ -506,13 +542,16 @@ class Engine {
 			foreach ( (array) $e['rows'] as $m ) {
 				$wpdb->insert( $wpdb->postmeta, [ 'post_id' => (int) $e['post_id'], 'meta_key' => $m[0], 'meta_value' => $m[1] ], [ '%d', '%s', '%s' ] );
 			}
+
 			$posts[ (int) $e['post_id'] ] = true;
 			$cursor                       = (int) $r->id;
 		}
+
 		foreach ( array_keys( $posts ) as $pid ) {
 			clean_post_cache( $pid );
 			wp_cache_delete( $pid, 'post_meta' );
 		}
+
 		$done         = count( $rows ) < $limit;
 		$rb           = (array) Store::get( 'rollback', $stamp );
 		$rb['cursor'] = $cursor;
@@ -520,6 +559,7 @@ class Engine {
 			$rb['status']   = 'complete';
 			$rb['finished'] = gmdate( 'c' );
 		}
+
 		Store::put( 'rollback', $stamp, 0, '', $rb );
 
 		return [ 'processed' => count( $rows ), 'cursor' => $cursor, 'done' => $done ];
