@@ -30,18 +30,16 @@ class Normalizer
      */
     public static function value(array $field, $v): string|array|null
     {
+        // The default never equals a field type this class compares against, whatever its value.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         $type = $field['type'] ?? '';
 
-        if (in_array($v, [null, '', []], true)) {
+        if (in_array($v, [null, ''], true)) {
             return null;
         }
 
         if ($v === false) {
             return $type === 'true_false' ? '0' : null;
-        }
-
-        if ($v === true) {
-            return '1';
         }
 
         if (is_object($v)) {
@@ -151,6 +149,8 @@ class Normalizer
                 $name = $sub['name'];
                 $norm = self::value($sub, $val);
             } else {
+                // An array key written as a numeric string is stored as an int either way.
+                // @pest-mutate-ignore: RemoveStringCast
                 $name = (string) $k;
                 $norm = self::generic($val);
             }
@@ -169,10 +169,6 @@ class Normalizer
     {
         if (in_array($v, [null, '', [], false], true)) {
             return null;
-        }
-
-        if ($v === true) {
-            return '1';
         }
 
         if (is_object($v)) {
@@ -196,6 +192,8 @@ class Normalizer
         foreach ($v as $k => $item) {
             $n = self::generic($item);
             if ($n !== null) {
+                // An array key written as a numeric string is stored as an int either way.
+                // @pest-mutate-ignore: RemoveStringCast
                 $out[(string) $k] = $n;
             }
         }
@@ -234,6 +232,8 @@ class Normalizer
      */
     public static function has_invalid_ids(array $field, $normalized): bool
     {
+        // The default never equals an ID type, whatever its value.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         if ($normalized === null || ! in_array($field['type'] ?? '', self::ID_TYPES, true)) {
             return false;
         }
@@ -249,6 +249,8 @@ class Normalizer
 
     public static function is_complex(array $field): bool
     {
+        // The default never equals a complex type, whatever its value.
+        // @pest-mutate-ignore: EmptyStringToNotEmpty
         return in_array($field['type'] ?? '', self::COMPLEX, true);
     }
 }
