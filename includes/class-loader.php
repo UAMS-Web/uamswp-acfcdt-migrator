@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace UAMSWP_ACFCDT_Migrator;
 
 /**
- * The plugin's load-time branching, kept out of the main file so a unit test can reach every branch.
+ * The plugin's load-time branching, kept out of the main file so that a unit test can reach every branch.
  *
  * The main file holds the double-load guard, the two constants and one call into this class. What is loaded depends
  * on how the file was loaded: the WP-CLI command only when WP-CLI is running, and the admin screens only when
