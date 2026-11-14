@@ -21,6 +21,13 @@
       "always": true
     },
     {
+      "name": "lint-floor",
+      "run": "php -l",
+      "php": "8.2",
+      "each": ["**/*.php", "!vendor/**", "!tests/**"],
+      "always": true
+    },
+    {
       "name": "synced-files",
       "run": "node .claude/skills/synced-files/scripts/check-synced-files.mjs",
       "always": true,

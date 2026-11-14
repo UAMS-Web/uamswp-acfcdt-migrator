@@ -3,6 +3,9 @@
     "description": "Moves ACF values out of ACF Custom Database Tables into core postmeta with snapshot, verify and rollback.",
     "type": "wordpress-plugin",
     "license": "proprietary",
+    "require": {
+        "php": ">=8.2"
+    },
     "require-dev": {
         "brain/monkey": "^2.7",
         "pestphp/pest": "^5.3"

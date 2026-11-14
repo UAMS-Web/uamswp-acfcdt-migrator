@@ -6,7 +6,7 @@
  * Author: UAMS Web Services
  * Author URI: https://communications.uams.edu/web/
  * Network: true
- * Requires PHP: 7.4
+ * Requires PHP: 8.2
  */
 
 // Guard against double-loading (e.g. network-activated AND passed via `wp --require`).
