@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace UAMSWP_ACFCDT_Migrator\Tests\Integration;
 
+use ACFCustomDatabaseTables\Core;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\Store;
 use UAMSWP_ACFCDT_Migrator\Tests\Support\IntegrationTestCase;
@@ -24,7 +25,7 @@ final class PluginStackTest extends IntegrationTestCase
     {
         $this->assertTrue(function_exists('acf_get_value'), 'ACF Pro is loaded.');
         $this->assertTrue(class_exists('ACFE', false), 'ACF Extended is loaded.');
-        $this->assertTrue(class_exists('ACFCustomDatabaseTables\Core'), 'ACF Custom Database Tables is loaded.');
+        $this->assertTrue(class_exists(Core::class), 'ACF Custom Database Tables is loaded.');
         $this->assertTrue(class_exists(Engine::class, false), 'The migrator is loaded.');
     }
 

@@ -31,7 +31,10 @@
         "refactor": "rector",
         "refactor:sweep": "rector --clear-cache --config=rector-sweep.php",
         "lint:floor": "@php scripts/lint-floor.php",
-        "stan": "phpstan analyse --no-progress --memory-limit=2G",
+        "stan": [
+            "@setup:integration",
+            "phpstan analyse --no-progress --memory-limit=2G"
+        ],
         "setup:integration": "@composer install --working-dir=tests/Integration",
         "test": [
             "@test:unit",
@@ -49,7 +52,7 @@
         "refactor": "Apply Rector's gating profile.",
         "refactor:sweep": "Apply Rector's sweep profile (run deliberately, review the diff).",
         "lint:floor": "Parse every shipped PHP file with the PHP that runs the script; run it under PHP 8.2.",
-        "stan": "Run PHPStan at the configured level.",
+        "stan": "Install the Integration suite's Composer setup, then run PHPStan at the configured level.",
         "setup:integration": "Install the Integration suite's own Composer setup (PHPUnit 9.6, wp-phpunit, the polyfills).",
         "test": "Run both suites, each in its own process, so the Unit suite never sees WordPress.",
         "test:pint": "Check formatting with Pint without changing files.",
