@@ -31,11 +31,19 @@
         "refactor": "rector",
         "refactor:sweep": "rector --clear-cache --config=rector-sweep.php",
         "lint:floor": "@php scripts/lint-floor.php",
-        "stan": "phpstan analyse --no-progress --memory-limit=2G",
-        "test": "@test:unit",
+        "stan": [
+            "@setup:integration",
+            "phpstan analyse --no-progress --memory-limit=2G"
+        ],
+        "setup:integration": "@composer install --working-dir=tests/Integration",
+        "test": [
+            "@test:unit",
+            "@test:integration"
+        ],
         "test:pint": "pint --test",
         "test:refactor": "rector --dry-run",
         "test:refactor:sweep": "rector --dry-run --clear-cache --config=rector-sweep.php",
+        "test:integration": "@php tests/Integration/vendor/bin/phpunit --configuration tests/Integration/phpunit.xml",
         "test:unit": "pest",
         "mutate": "pest --mutate --path=includes --covered-only"
     },
@@ -44,11 +52,13 @@
         "refactor": "Apply Rector's gating profile.",
         "refactor:sweep": "Apply Rector's sweep profile (run deliberately, review the diff).",
         "lint:floor": "Parse every shipped PHP file with the PHP that runs the script; run it under PHP 8.2.",
-        "stan": "Run PHPStan at the configured level.",
-        "test": "Run the test suite.",
+        "stan": "Install the Integration suite's Composer setup, then run PHPStan at the configured level.",
+        "setup:integration": "Install the Integration suite's own Composer setup (PHPUnit 9.6, wp-phpunit, the polyfills).",
+        "test": "Run both suites, each in its own process, so the Unit suite never sees WordPress.",
         "test:pint": "Check formatting with Pint without changing files.",
         "test:refactor": "Preview Rector's gating profile.",
         "test:refactor:sweep": "Preview Rector's sweep profile.",
+        "test:integration": "Run the PHPUnit 9.6 suite that boots WordPress and the real ACF plugin stack against the test database.",
         "test:unit": "Run the Pest suite that needs no WordPress and no database.",
         "mutate": "Run the mutation pass over includes, covered code only."
     }

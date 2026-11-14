@@ -1,0 +1,19 @@
+{
+    "plugins": {
+        "advanced-custom-fields-pro": {
+            "main": "acf.php",
+            "version": "6.4.2",
+            "sha256": "d781ae2f21c1fd1af5e8403a59f2e9e5f87bbe5edb14b9e145510c435e2ee3f0"
+        },
+        "acf-extended": {
+            "main": "acf-extended.php",
+            "version": "0.9.2.6",
+            "sha256": "5a6c618236e8573806c8f79223d4daf9676f6ed11c6b1f5f825ea0451223b396"
+        },
+        "acf-custom-database-tables": {
+            "main": "acf-custom-database-tables.php",
+            "version": "1.1.0-beta3",
+            "sha256": "dff84f6e1c67622884916efcf69c3375d3ff7bae94eab260dd9aadc3d0ae46e9"
+        }
+    }
+}
