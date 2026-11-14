@@ -43,5 +43,6 @@ require_once __DIR__.'/../includes/class-store.php';
 require_once __DIR__.'/../includes/class-engine.php';
 require_once __DIR__.'/../includes/class-command.php';
 require_once __DIR__.'/../includes/class-admin.php';
+require_once __DIR__.'/../includes/class-loader.php';
 
 // cspell:ignore ABSPATH autoloaded

@@ -58,6 +58,11 @@ if (! class_exists('WP_CLI', false)) {
             return $string;
         }
 
+        public static function add_command(string $name, string $callable): void
+        {
+            CommandTestCli::$calls[] = ['add_command', $name, $callable];
+        }
+
         public static function get_runner(): object
         {
             return CommandTestCli::$runner;
