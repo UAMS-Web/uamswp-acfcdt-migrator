@@ -5,8 +5,9 @@ name: CI
 # The lint and unit chain is the shared one, `UAMS-Web/uams-ci-workflows`, called by the `checks` job, so
 # one definition serves every UAMS-Web repository and this plugin carries no copy that drifts. The call
 # switches on the two jobs only a plugin runs (`floor-lint`, `download-archive`), runs on Linux only, and
-# runs the unit suite as `composer test:unit`. Mutation testing is off (`mutate: false`) until it is turned
-# on in a ticket of its own; `mutate-ignore: true` still audits the `@pest-mutate-ignore` annotations.
+# runs the unit suite as `composer test:unit`. Mutation testing is on: a pull request or push mutates the
+# changed files under `includes` (`mutate-paths`), and a manual dispatch mutates all of it with `composer mutate`.
+# The main plugin file is not mutated: it is excluded from the coverage source (docs/DECISIONS.md, #55).
 # `phpcs` stays off: this plugin has no PHPCS configuration. The chain's own header lists every input.
 #
 # The last job, `CI`, is the one check a ruleset requires from this workflow (with the two pull-request-body
@@ -42,7 +43,8 @@ jobs:
     uses: UAMS-Web/uams-ci-workflows/.github/workflows/ci.yml@v0.12.0
     with:
       linux-only: true
-      mutate: false
+      mutate: true
+      mutate-paths: includes
       mutate-ignore: true
       mutate-ignore-paths: includes
       floor-lint: true
