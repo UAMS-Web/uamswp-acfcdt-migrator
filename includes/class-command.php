@@ -174,7 +174,6 @@ class Command
                 }
             }
 
-            $orphan_file = '';
             if ($orphans !== []) {
                 $orphan_file = "$dir/site-{$site->blog_id}-{$table}-orphan-columns.csv";
                 $cols = array_merge(['post_id'], $orphans);
@@ -186,9 +185,10 @@ class Command
                 }, $orphans));
                 $rows = $wpdb->get_results("SELECT $quoted FROM `$table` WHERE $where ORDER BY post_id", ARRAY_A);
                 $oh = fopen($orphan_file, 'w');
-                fputcsv($oh, $cols);
+                // The escape character is passed as its current default: omitting it is deprecated as of PHP 8.4.
+                fputcsv($oh, $cols, ',', '"', '\\');
                 foreach ($rows as $r) {
-                    fputcsv($oh, $r);
+                    fputcsv($oh, $r, ',', '"', '\\');
                 }
 
                 fclose($oh);

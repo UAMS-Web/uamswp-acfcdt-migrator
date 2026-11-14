@@ -38,5 +38,9 @@ if (! defined('ABSPATH')) {
  */
 require_once __DIR__.'/../includes/class-normalizer.php';
 require_once __DIR__.'/../includes/class-hook-guard.php';
+require_once __DIR__.'/../includes/class-site.php';
+require_once __DIR__.'/../includes/class-store.php';
+require_once __DIR__.'/../includes/class-engine.php';
+require_once __DIR__.'/../includes/class-command.php';
 
 // cspell:ignore ABSPATH autoloaded
