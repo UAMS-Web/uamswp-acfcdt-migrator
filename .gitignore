@@ -10,4 +10,5 @@
 .vscode/
 .idea/
 /vendor/
+/tests/Integration/vendor/
 /.phpstan/

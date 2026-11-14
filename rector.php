@@ -116,8 +116,8 @@ return RectorConfig::configure()
     ->withSkip([
         // WordPress repositories whose Integration suite has its own Composer
         // setup (the tests skill): its vendor/ sits inside tests/, and Rector
-        // would otherwise rewrite PHPUnit 9 and its dependencies. Uncomment.
-        // __DIR__.'/tests/Integration/vendor',
+        // would otherwise rewrite PHPUnit 9 and its dependencies.
+        __DIR__.'/tests/Integration/vendor',
         ...$neverRules,
         ...($isSweepProfile ? [] : $sweepOnlyRules),
     ])
