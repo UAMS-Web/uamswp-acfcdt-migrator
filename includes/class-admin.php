@@ -68,7 +68,8 @@ class Admin
         echo '<table class="widefat striped"><thead><tr><th>Site</th><th>Tables</th><th>Snapshots</th><th>Latest backfill</th><th></th></tr></thead><tbody>';
         $any = false;
         foreach (get_sites(['number' => 0, 'deleted' => 0]) as $s) {
-            switch_to_blog($s->blog_id);
+            // A `WP_Site` holds its ID as a numeric string; `switch_to_blog()` takes an integer.
+            switch_to_blog((int) $s->blog_id);
             $site = new Site;
             $tables = array_keys($site->active_defs());
             if ($tables !== []) {

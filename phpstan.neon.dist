@@ -46,7 +46,7 @@ parameters:
     # The highest level the code passes today (see the code-quality skill); raised
     # by one per change as findings are fixed, until `max`. Lowering it is a
     # deliberate, argued change.
-    level: 4
+    level: 5
 
     # First-party PHP: the includes, the plugin header file and the tests.
     paths:
@@ -62,6 +62,11 @@ parameters:
     excludePaths:
         analyse:
             - tests/Integration/vendor
+        # wp-phpunit's drop-in object cache redeclares `wp_cache_*()` with narrower
+        # types than WordPress (`wp_cache_delete()` takes a string key there, `int|string`
+        # in core), so scanning it makes valid calls fail. Left out of the scan too.
+        analyseAndScan:
+            - tests/Integration/vendor/wp-phpunit/wp-phpunit/includes/object-cache.php
 
     # Indexed for symbols but not analyzed. `php-stubs/wordpress-stubs` covers
     # core's runtime surface and stops there: `WP_UnitTestCase`, the factories
