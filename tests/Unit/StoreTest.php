@@ -242,7 +242,7 @@ it('requires the core upgrade file through ABSPATH', function (): void {
 
     Store::install();
 
-    expect(in_array(realpath($path), array_map('realpath', get_included_files()), true))->toBeTrue();
+    expect(in_array(realpath($path), array_map(realpath(...), get_included_files()), true))->toBeTrue();
 });
 
 // put()
