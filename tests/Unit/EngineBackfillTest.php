@@ -152,6 +152,7 @@ function eng_bf_wire(array $o = []): ArrayObject
 function eng_bf_wpdb(array $rows): MockInterface
 {
     $GLOBALS['eng_bf_executed'] = [];
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
     $wpdb->shouldReceive('prepare')->andReturnUsing(fn (string $query, ...$args): string => 'P:'.$query);

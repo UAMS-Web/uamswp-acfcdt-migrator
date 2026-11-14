@@ -26,7 +26,7 @@ class Normalizer
     /**
      * @param  array  $field  ACF field array
      * @param  mixed  $v  raw value from acf_get_value()
-     * @return mixed|null
+     * @return array<mixed>|string|null
      */
     public static function value(array $field, $v): string|array|null
     {

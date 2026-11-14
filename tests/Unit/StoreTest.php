@@ -57,6 +57,7 @@ afterEach(function (): void {
 function store_wpdb(array $returns = []): MockInterface
 {
     $GLOBALS['store_returns'] = $returns;
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->base_prefix = 'wpx_';
     $wpdb->shouldReceive('esc_like')->andReturnUsing(fn (string $t): string => addcslashes($t, '_%\\'));

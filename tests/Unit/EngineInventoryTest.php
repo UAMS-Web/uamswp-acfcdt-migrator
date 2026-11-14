@@ -72,6 +72,7 @@ afterEach(function (): void {
 function eng_inv_wpdb(array $returns = []): MockInterface
 {
     $GLOBALS['eng_inv_returns'] = $returns;
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
     $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {

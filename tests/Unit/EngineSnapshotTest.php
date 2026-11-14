@@ -134,6 +134,7 @@ function eng_snap_wpdb(array $rows): MockInterface
 {
     $GLOBALS['eng_snap_prepared'] = [];
     $GLOBALS['eng_snap_executed'] = [];
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
     $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {
@@ -315,7 +316,7 @@ function eng_snap_fields(): array
  * Runs `snapshot_batch()` with `fields_for_post()` and `acf_get_value()` answered from the given maps.
  *
  * @param  array<int, mixed>  $values  post id => (field name => raw value)
- * @param  list<array<string, mixed>>  $extra  receives the call records: fields_for_post and acf_get_value
+ * @param  ArrayObject<int, mixed>  $calls  receives the call records: fields_for_post and acf_get_value
  */
 function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, string $label = 'before', mixed $cursor = 0, int $limit = 25, mixed $ids = null): array
 {

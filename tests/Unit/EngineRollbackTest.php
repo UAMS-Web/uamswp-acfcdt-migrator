@@ -13,6 +13,7 @@
 
 declare(strict_types=1);
 
+use Mockery\MockInterface;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\Site;
 use UAMSWP_ACFCDT_Migrator\Store;
@@ -84,6 +85,7 @@ function eng_rb_wire(array $o = []): ArrayObject
 /** A `$wpdb` stand-in that records every `insert()` it is handed, in the shared log. */
 function eng_rb_wpdb(ArrayObject $st): void
 {
+    /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->postmeta = 'wpx_postmeta';
     $wpdb->shouldReceive('insert')->andReturnUsing(function (...$a) use ($st): int {
