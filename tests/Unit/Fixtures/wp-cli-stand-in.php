@@ -14,7 +14,7 @@ if (! class_exists('CommandTestCli', false)) {
      */
     class CommandTestCli
     {
-        /** @var list<array{0: string, 1: mixed}> */
+        /** @var list<array<int, mixed>> */
         public static array $calls = [];
 
         public static object $runner;

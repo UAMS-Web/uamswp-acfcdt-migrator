@@ -527,8 +527,11 @@ it('starts a snapshot with the label, mode and overwrite flag, and reports the p
     adm_ajax(['op' => 'snapshot_start', 'label' => 'x', 'mode' => 'effective']);
     adm_ajax(['op' => 'snapshot_start', 'label' => 'x', 'mode' => 'effective', 'overwrite' => '']);
 
-    expect($args->getArrayCopy()[1])->toBe(['x', 'effective', false])
-        ->and($args->getArrayCopy()[2])->toBe(['x', 'effective', false]);
+    expect($args->getArrayCopy())->toBe([
+        ['before', 'meta', true],
+        ['x', 'effective', false],
+        ['x', 'effective', false],
+    ]);
 });
 
 it('runs a snapshot batch with the cursor and limit it was given', function (): void {

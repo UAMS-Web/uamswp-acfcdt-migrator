@@ -59,6 +59,7 @@ afterEach(function (): void {
  */
 function eng_snap_wire(array $answers = []): ArrayObject
 {
+    /** @var ArrayObject<string, list<mixed>> $st */
     $st = new ArrayObject(['log' => []]);
     $note = function (string $name, array $args) use ($st): void {
         $log = $st['log'];
