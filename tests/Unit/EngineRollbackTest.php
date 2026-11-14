@@ -38,6 +38,7 @@ afterEach(function (): void {
  * (what `Store::rows()` returns).
  *
  * @param  array<string, mixed>  $o
+ * @return ArrayObject<string, list<mixed>>
  */
 function eng_rb_wire(array $o = []): ArrayObject
 {
@@ -83,7 +84,11 @@ function eng_rb_wire(array $o = []): ArrayObject
     return $st;
 }
 
-/** A `$wpdb` stand-in that records every `insert()` it is handed, in the shared log. */
+/**
+ * A `$wpdb` stand-in that records every `insert()` it is handed, in the shared log.
+ *
+ * @param  ArrayObject<string, list<mixed>>  $st
+ */
 function eng_rb_wpdb(ArrayObject $st): void
 {
     /** @var wpdb&MockInterface $wpdb */
@@ -99,13 +104,22 @@ function eng_rb_wpdb(ArrayObject $st): void
     $GLOBALS['wpdb'] = $wpdb;
 }
 
-/** A backup row as `Store::rows()` returns it: a numeric id and a JSON `data` column. */
+/**
+ * A backup row as `Store::rows()` returns it: a numeric id and a JSON `data` column.
+ *
+ * @param  array<string, mixed>  $entry
+ */
 function eng_rb_row(int $id, array $entry): object
 {
     return (object) ['id' => (string) $id, 'data' => json_encode($entry)];
 }
 
-/** A backup entry for one field of one post. */
+/**
+ * A backup entry for one field of one post.
+ *
+ * @param  list<list<string>>  $rows
+ * @return array<string, mixed>
+ */
 function eng_rb_entry(int $post_id, string $field, array $rows, ?bool $complex = false): array
 {
     $entry = ['post_id' => (string) $post_id, 'field' => $field, 'rows' => $rows];
@@ -116,13 +130,23 @@ function eng_rb_entry(int $post_id, string $field, array $rows, ?bool $complex =
     return $entry;
 }
 
-/** The logged calls with the given names, one row per call. */
+/**
+ * The logged calls with the given names, one row per call.
+ *
+ * @param  ArrayObject<string, list<mixed>>  $st
+ * @return list<array<int, mixed>>
+ */
 function eng_rb_calls(ArrayObject $st, string ...$names): array
 {
     return array_values(array_filter($st['log'], fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
-/** The names of every logged call, in order. */
+/**
+ * The names of every logged call, in order.
+ *
+ * @param  ArrayObject<string, list<mixed>>  $st
+ * @return list<string>
+ */
 function eng_rb_order(ArrayObject $st): array
 {
     return array_map(fn (array $row): string => $row[0], $st['log']);
@@ -139,7 +163,7 @@ function eng_rb_dash(): string
  *
  * @param  list<object>  $rows
  * @param  array<string, mixed>  $o  `eng_rb_wire()` options
- * @return array{0: array<string, mixed>, 1: ArrayObject}
+ * @return array{0: array<string, mixed>, 1: ArrayObject<string, list<mixed>>}
  */
 function eng_rb_batch(array $rows, array $o = [], mixed $cursor = 0, int $limit = 100): array
 {

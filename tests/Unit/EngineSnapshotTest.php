@@ -56,6 +56,7 @@ afterEach(function (): void {
  * true by default). The log holds `[name, ...arguments]` rows in call order.
  *
  * @param  array<string, mixed>  $answers
+ * @return ArrayObject<string, list<mixed>>
  */
 function eng_snap_wire(array $answers = []): ArrayObject
 {
@@ -112,6 +113,7 @@ function eng_snap_wire(array $answers = []): ArrayObject
 /**
  * The logged calls, one row per call, filtered to the given names.
  *
+ * @param  ArrayObject<string, list<mixed>>  $st
  * @param  list<string>  $names
  * @return list<array<int, mixed>>
  */
@@ -120,7 +122,12 @@ function eng_snap_calls(ArrayObject $st, array $names): array
     return array_values(array_filter($st['log'], fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
-/** The names of every logged call, in order. */
+/**
+ * The names of every logged call, in order.
+ *
+ * @param  ArrayObject<string, list<mixed>>  $st
+ * @return list<string>
+ */
 function eng_snap_order(ArrayObject $st): array
 {
     return array_map(fn (array $row): string => $row[0], $st['log']);
@@ -304,7 +311,11 @@ it('records the mode asked for only while the caching plugin is hooked in', func
 
 // snapshot_batch()
 
-/** The two tracked fields the batch tests give every post, with what ACF returns for each. */
+/**
+ * The two tracked fields the batch tests give every post, with what ACF returns for each.
+ *
+ * @return array<string, array<string, string>>
+ */
 function eng_snap_fields(): array
 {
     return [
@@ -318,6 +329,7 @@ function eng_snap_fields(): array
  *
  * @param  array<int, mixed>  $values  post id => (field name => raw value)
  * @param  ArrayObject<int, mixed>  $calls  receives the call records: fields_for_post and acf_get_value
+ * @return array<string, mixed>
  */
 function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, string $label = 'before', mixed $cursor = 0, int $limit = 25, mixed $ids = null): array
 {
@@ -461,7 +473,7 @@ it('keeps the cursor and writes a running record when the page is full', functio
         ->and(eng_snap_calls($st, ['count']))->toBe([]);
 
     $puts = eng_snap_calls($st, ['put']);
-    $progress = end($puts);
+    $progress = $puts[count($puts) - 1];
     expect(array_slice($progress, 0, 5))->toBe(['put', 'snapinfo', 'before', 0, ''])
         ->and($progress[5])->toBe(['mode' => 'effective', 'status' => 'running', 'total' => 9, 'cursor' => 6]);
 });
@@ -477,7 +489,7 @@ it('completes the snapshot when the page is short, counting its rows', function 
         ->and(eng_snap_calls($st, ['count']))->toBe([['count', 'snapshot', 'before']]);
 
     $puts = eng_snap_calls($st, ['put']);
-    $final = end($puts);
+    $final = $puts[count($puts) - 1];
     $info = $final[5];
     expect(array_slice($final, 0, 5))->toBe(['put', 'snapinfo', 'before', 0, ''])
         ->and(array_keys($info))->toBe(['mode', 'status', 'total', 'cursor', 'finished', 'posts'])
@@ -521,7 +533,12 @@ it('resets the caches once for each post it reads', function (): void {
 
 // compare()
 
-/** A stored snapshot record: the post's title and its fields as `name => value`. */
+/**
+ * A stored snapshot record: the post's title and its fields as `name => value`.
+ *
+ * @param  array<int|string, mixed>  $fields
+ * @return array<string, mixed>
+ */
 function eng_snap_rec(string $title, array $fields): array
 {
     return [
@@ -535,6 +552,9 @@ function eng_snap_rec(string $title, array $fields): array
  *
  * @param  array<int, array<string, mixed>>  $a
  * @param  array<int, array<string, mixed>>  $b
+ * @param  array<string, mixed>  $info_a
+ * @param  array<string, mixed>  $info_b
+ * @return ArrayObject<string, list<mixed>>
  */
 function eng_snap_two(array $a, array $b, array $info_a = ['status' => 'complete'], array $info_b = ['status' => 'complete']): ArrayObject
 {

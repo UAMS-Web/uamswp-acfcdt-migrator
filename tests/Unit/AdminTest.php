@@ -188,7 +188,11 @@ function adm_store(array $methods): void
     }
 }
 
-/** Runs the AJAX endpoint with a request body and returns what it sent. */
+/**
+ * Runs the AJAX endpoint with a request body and returns what it sent.
+ *
+ * @param  array<string, mixed>  $post
+ */
 function adm_ajax(array $post): AdminTestSent
 {
     $_POST = $post;
@@ -202,7 +206,11 @@ function adm_ajax(array $post): AdminTestSent
     throw new LogicException('Nothing was sent.');
 }
 
-/** Runs the download handler and returns what it printed, stopping where it would exit. */
+/**
+ * Runs the download handler and returns what it printed, stopping where it would exit.
+ *
+ * @param  array<string, mixed>  $get
+ */
 function adm_download(array $get): string
 {
     $_GET = $get;
@@ -233,13 +241,22 @@ function adm_capture(Closure $render, bool $collapse = true): string
     return $collapse ? trim((string) preg_replace('/\s+/', ' ', $out)) : $out;
 }
 
-/** The headers `Admin::headers()` sent. */
+/**
+ * The headers `Admin::headers()` sent.
+ *
+ * @return list<string>
+ */
 function adm_headers(): array
 {
     return array_values(array_map(fn (array $c): string => $c[1], array_filter(AdminTestSpy::$calls, fn (array $c): bool => $c[0] === 'header')));
 }
 
-/** An inventory with every key the site page reads. */
+/**
+ * An inventory with every key the site page reads.
+ *
+ * @param  array<string, mixed>  $over
+ * @return array<string, mixed>
+ */
 function adm_inventory(array $over = []): array
 {
     return $over + [
@@ -255,7 +272,12 @@ function adm_inventory(array $over = []): array
     ];
 }
 
-/** A table row of the inventory that exists. */
+/**
+ * A table row of the inventory that exists.
+ *
+ * @param  array<string, mixed>  $over
+ * @return array<string, mixed>
+ */
 function adm_table(array $over = []): array
 {
     return $over + [
@@ -275,6 +297,7 @@ function adm_table(array $over = []): array
 /**
  * Renders the site page with a given inventory and stored headers.
  *
+ * @param  array<string, mixed>  $inv
  * @param  array<string, array<string, array<string, mixed>>>  $headers  Header rows by kind (snapinfo, run, rollback).
  */
 function adm_page(array $inv, array $headers = [], ?Closure $posts_upto = null): string
@@ -359,7 +382,9 @@ it('adds the network settings page', function (): void {
 /**
  * Sets the sites and their active table definitions for the overview.
  *
+ * @param  list<object>  $sites
  * @param  array<int, list<string>>  $tables  Active table names by blog id.
+ * @param  array<int, array<string, array<string, array<string, mixed>>>>  $headers  Header rows by blog id and kind.
  */
 function adm_network(array $sites, array $tables, array $headers = []): string
 {
@@ -650,6 +675,7 @@ it('runs a rollback batch', function (): void {
  * Stubs `Engine::compare()` to return the given diffs and records its arguments.
  *
  * @param  list<array<string, mixed>>  $diffs
+ * @param  ArrayObject<int, mixed>|null  $args
  */
 function adm_compare(array $diffs, ?ArrayObject $args = null): void
 {
@@ -762,6 +788,10 @@ it('looks the run and its rollback up before deleting a run', function (): void 
 
 /**
  * Sets what the Store holds for a run and its rollback and records what is deleted.
+ *
+ * @param  array<string, mixed>|null  $run
+ * @param  array<string, mixed>|null  $rollback
+ * @return ArrayObject<int, mixed>
  */
 function adm_delete_store(?array $run, ?array $rollback): ArrayObject
 {
@@ -1376,13 +1406,23 @@ it('escapes the names in the snapshot table', function (): void {
         ->and($html)->toContain('s&lt;t');
 });
 
-/** A run header. */
+/**
+ * A run header.
+ *
+ * @param  array<string, mixed>  $over
+ * @return array<string, mixed>
+ */
 function adm_run(array $over = []): array
 {
     return $over + ['status' => 'complete', 'started' => 'T0', 'total' => 20, 'cursor' => 0, 'stats' => adm_stats()];
 }
 
-/** A run header with no stored counts, so the page asks the change rows for them. */
+/**
+ * A run header with no stored counts, so the page asks the change rows for them.
+ *
+ * @param  array<string, mixed>  $over
+ * @return array<string, mixed>
+ */
 function adm_bare_run(array $over = []): array
 {
     $run = adm_run($over);
@@ -1391,7 +1431,12 @@ function adm_bare_run(array $over = []): array
     return $run;
 }
 
-/** Run statistics. */
+/**
+ * Run statistics.
+ *
+ * @param  array<string, mixed>  $over
+ * @return array<string, mixed>
+ */
 function adm_stats(array $over = []): array
 {
     return $over + ['posts' => 6, 'fields' => 9, 'fill' => 5, 'overwrite' => 3, 'clear' => 1, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0];

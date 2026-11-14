@@ -24,7 +24,7 @@ class Normalizer
     const ID_TYPES = ['taxonomy', 'relationship', 'post_object', 'gallery', 'user', 'image', 'file'];
 
     /**
-     * @param  array  $field  ACF field array
+     * @param  array<string, mixed>  $field  ACF field array
      * @param  mixed  $v  raw value from acf_get_value()
      * @return array<mixed>|string|null
      */
@@ -119,7 +119,13 @@ class Normalizer
         }
     }
 
-    /** Normalize one repeater/group row: map keys (field_xxx or name) to names, drop empties, sort. */
+    /**
+     * Normalize one repeater/group row: map keys (field_xxx or name) to names, drop empties, sort.
+     *
+     * @param  array<int|string, mixed>  $subs  Sub-field definitions.
+     * @param  mixed  $row
+     * @return array<mixed>|string|null
+     */
     private static function row(array $subs, $row): string|array|null
     {
         if (! is_array($row)) {
@@ -165,6 +171,10 @@ class Normalizer
         return $out; // an all-empty row stays [] (row count still matters)
     }
 
+    /**
+     * @param  mixed  $v
+     * @return array<mixed>|string|null
+     */
     public static function generic($v): string|array|null
     {
         if (in_array($v, [null, '', [], false], true)) {
@@ -203,6 +213,9 @@ class Normalizer
         return $out ?: null;
     }
 
+    /**
+     * @param  array<mixed>  $a
+     */
     private static function is_list(array $a): bool
     {
         $i = 0;
@@ -215,12 +228,21 @@ class Normalizer
         return true;
     }
 
-    /** Stable JSON used for equality checks and file output. */
+    /**
+     * Stable JSON used for equality checks and file output.
+     *
+     * @param  mixed  $normalized
+     * @return string|false
+     */
     public static function json($normalized)
     {
         return wp_json_encode($normalized, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
+    /**
+     * @param  mixed  $a
+     * @param  mixed  $b
+     */
     public static function same($a, $b): bool
     {
         return self::json($a) === self::json($b);
@@ -229,6 +251,9 @@ class Normalizer
     /**
      * True if an ID field holds something that isn't an ID (e.g. a corrupted string like "10522]").
      * Those are reported for manual review instead of being written.
+     *
+     * @param  array<string, mixed>  $field
+     * @param  mixed  $normalized
      */
     public static function has_invalid_ids(array $field, $normalized): bool
     {
@@ -247,6 +272,9 @@ class Normalizer
         return false;
     }
 
+    /**
+     * @param  array<string, mixed>  $field
+     */
     public static function is_complex(array $field): bool
     {
         // The default never equals a complex type, whatever its value.

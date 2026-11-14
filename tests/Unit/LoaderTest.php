@@ -68,7 +68,11 @@ function loader_dir(): string
     return $dir;
 }
 
-/** Runs `Loader::load()` over a fresh directory and returns what was included, in order. */
+/**
+ * Runs `Loader::load()` over a fresh directory and returns what was included, in order.
+ *
+ * @return list<string>
+ */
 function loader_run(bool $cli, bool $hooks, bool $admin): array
 {
     LoaderTestEnv::$defined['WP_CLI'] = $cli;

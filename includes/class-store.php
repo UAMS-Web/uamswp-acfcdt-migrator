@@ -62,7 +62,13 @@ class Store
     }
 
     /**
+     * @param  string  $kind  Row kind, such as `snapinfo`, `run`, `change`.
+     * @param  string  $ref  Snapshot label or run stamp.
+     * @param  int|string  $post_id  Cast to an integer.
+     * @param  int|string  $field  Cast to a string.
+     * @param  mixed  $data  Anything `Normalizer::json()` can encode.
      * @param  string  $mode  'replace' or 'ignore'
+     * @return int|bool Rows affected, or `false` when the query failed.
      */
     public static function put($kind, $ref, $post_id, $field, $data, $mode = 'replace')
     {
@@ -82,6 +88,13 @@ class Store
         ));
     }
 
+    /**
+     * @param  string  $kind
+     * @param  string  $ref
+     * @param  int|string  $post_id  Cast to an integer.
+     * @param  int|string  $field  Cast to a string.
+     * @return mixed The decoded value, or `null` when no row matches.
+     */
     public static function get($kind, $ref, $post_id = 0, $field = '')
     {
         global $wpdb;
@@ -97,7 +110,16 @@ class Store
         return $json === null ? null : json_decode($json, true);
     }
 
-    /** Rows of one kind/ref, cursor-paged by id. */
+    /**
+     * Rows of one kind/ref, cursor-paged by id.
+     *
+     * @param  string  $kind
+     * @param  string  $ref
+     * @param  int  $after_id  Last row id already read; with `$desc`, `0` starts from the newest.
+     * @param  int  $limit
+     * @param  bool  $desc  Walk from the newest row down instead of the oldest up.
+     * @return array<int, \stdClass>|null
+     */
     public static function rows($kind, $ref, $after_id = 0, $limit = 500, $desc = false)
     {
         global $wpdb;
@@ -120,6 +142,8 @@ class Store
     /**
      * Every row of a kind/ref decoded, keyed by post_id (snapshots).
      *
+     * @param  string  $kind
+     * @param  string  $ref
      * @return mixed[]
      */
     public static function by_post($kind, $ref): array
@@ -139,6 +163,11 @@ class Store
         return $out;
     }
 
+    /**
+     * @param  string  $kind
+     * @param  string  $ref
+     * @param  string  $where_sql  Extra SQL appended to the `WHERE` clause, already prepared.
+     */
     public static function count($kind, $ref, $where_sql = ''): int
     {
         global $wpdb;
@@ -151,6 +180,11 @@ class Store
         ));
     }
 
+    /**
+     * @param  list<string>  $kinds
+     * @param  string  $ref
+     * @return int|bool Rows deleted, or `false` when the query failed.
+     */
     public static function delete(array $kinds, $ref)
     {
         global $wpdb;
@@ -167,7 +201,8 @@ class Store
     /**
      * List refs of a header kind (snapinfo / run) with their header data.
      *
-     * @return non-empty-array[]
+     * @param  string  $kind
+     * @return array<string, non-empty-array<string, mixed>>
      */
     public static function headers($kind): array
     {
@@ -185,7 +220,12 @@ class Store
         return $out;
     }
 
-    /** Category counts for a backfill run, computed from change rows (accurate even if batches were retried). */
+    /**
+     * Category counts for a backfill run, computed from change rows (accurate even if batches were retried).
+     *
+     * @param  string  $stamp
+     * @return array{stats: array<string, int>, by_field: list<array<string, int|string>>}
+     */
     public static function change_summary($stamp): array
     {
         global $wpdb;

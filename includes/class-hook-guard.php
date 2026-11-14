@@ -20,7 +20,7 @@ class HookGuard
 {
     const PLUGIN_NS = 'ACFCustomDatabaseTables\\';
 
-    /** @var array[] [hook, callable, priority, accepted_args] */
+    /** @var list<array{0: string, 1: mixed, 2: int, 3: mixed}> [hook, callable, priority, accepted_args] */
     private array $callbacks = [];
 
     /** @var object[] ACFGetFieldIntercept instances (have per-request caches we need to clear). */
@@ -74,9 +74,12 @@ class HookGuard
         return $this->callbacks !== [];
     }
 
+    /**
+     * @return list<string>
+     */
     public function hook_names(): array
     {
-        return array_values(array_unique(array_map(fn (array $c) => $c[0], $this->callbacks)));
+        return array_values(array_unique(array_map(fn (array $c): string => $c[0], $this->callbacks)));
     }
 
     public function callback_count(): int

@@ -27,6 +27,9 @@ class Admin
         add_action('admin_post_'.self::ACTION.'_dl', [self::class, 'download']);
     }
 
+    /**
+     * @return bool
+     */
     public static function can()
     {
         return is_multisite() ? current_user_can('manage_network_options') : current_user_can('manage_options');
@@ -44,6 +47,10 @@ class Admin
         add_submenu_page('settings.php', 'ACFCDT Migration', 'ACFCDT Migration', 'manage_network_options', self::SLUG, [self::class, 'network_page']);
     }
 
+    /**
+     * @param  int|string|null  $blog_id  The site whose screen to link to; the current site when empty.
+     * @return string
+     */
     private static function page_url($blog_id = null)
     {
         $base = $blog_id ? get_admin_url($blog_id, 'tools.php') : admin_url('tools.php');
@@ -51,6 +58,10 @@ class Admin
         return add_query_arg('page', self::SLUG, $base);
     }
 
+    /**
+     * @param  array<string, mixed>  $args  Query arguments added to the download URL.
+     * @return string
+     */
     private static function dl_url(array $args)
     {
         return wp_nonce_url(add_query_arg(array_merge(['action' => self::ACTION.'_dl'], $args), admin_url('admin-post.php')), self::NONCE);
@@ -263,7 +274,12 @@ class Admin
         self::script();
     }
 
-    /** Snapshot list or backfill-run list with actions. */
+    /**
+     * Snapshot list or backfill-run list with actions.
+     *
+     * @param  array<string, array<string, mixed>>  $items  Header data keyed by snapshot label or run stamp.
+     * @param  array<string, array<string, mixed>>  $rollbacks  Rollback headers keyed by run stamp.
+     */
     private static function header_table(string $type, array $items, Engine $engine, array $rollbacks = []): void
     {
         if ($items === []) {
@@ -423,6 +439,10 @@ class Admin
         }
     }
 
+    /**
+     * @param  mixed  $v
+     * @return string
+     */
     private static function preview($v)
     {
         $s = $v === null ? '(empty)' : (is_string($v) ? $v : Normalizer::json($v));

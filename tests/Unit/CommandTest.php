@@ -107,7 +107,11 @@ function cmd_calls(string $type): array
     return array_values(array_map(fn (array $c): mixed => $c[1], array_filter(CommandTestCli::$calls, fn (array $c): bool => $c[0] === $type)));
 }
 
-/** The header every data subcommand prints first. */
+/**
+ * The header every data subcommand prints first.
+ *
+ * @return list<list<string>>
+ */
 function cmd_header(): array
 {
     return [['log', ''], ['log', '%Y### Site 7: https://example.test/%n']];
@@ -233,6 +237,8 @@ it('turns a refused rollback into a CLI error', function (): void {
 });
 
 /**
+ * @param  ArrayObject<int, mixed>  $seen
+ * @param  list<array<string, mixed>>  $batches
  * @return array<string, mixed>
  */
 function cmd_snapshot_engine(ArrayObject $seen, array $batches = []): array
@@ -457,7 +463,9 @@ function cmd_summary(array $stats = [], array $by_field = []): array
 }
 
 /**
+ * @param  ArrayObject<int, mixed>  $seen
  * @param  list<array<string, mixed>>  $batches
+ * @param  array<string, mixed>  $summary
  */
 function cmd_backfill_engine(ArrayObject $seen, array $batches, array $summary): void
 {
@@ -747,6 +755,7 @@ function cmd_network(array $sites, array $table_names = ['provider']): MockInter
  * Replaces `run_child()` and records `[command, args, assoc, url]` for each call; `$codes` maps a URL to its exit
  * code (default 0).
  *
+ * @param  ArrayObject<int, mixed>  $seen
  * @param  array<string, int>  $codes
  */
 function cmd_children(ArrayObject $seen, array $codes = []): void
@@ -906,7 +915,11 @@ function cmd_closes(): int
     return count(array_filter(CommandTestProcess::$calls, fn (array $c): bool => $c[0] === 'fclose'));
 }
 
-/** The call to the process shim named `$name`, as recorded. */
+/**
+ * The call to the process shim named `$name`, as recorded.
+ *
+ * @return array<int, mixed>|null
+ */
 function cmd_process_call(string $name): ?array
 {
     foreach (CommandTestProcess::$calls as $call) {
@@ -1002,7 +1015,7 @@ it('returns 1 from a child that could not be started', function (): void {
  * @param  list<array<string, mixed>>  $defs
  * @param  array<string, array<string, mixed>>  $tables
  * @param  list<string>  $acf_fields  identifiers `acf_get_field()` knows (or all of them, with `$acf_knows_everything`)
- * @return array{dir: string, queries: ArrayObject, out_dir_args: ArrayObject}
+ * @return array{dir: string, queries: ArrayObject<int, mixed>, out_dir_args: ArrayObject<int, mixed>}
  */
 function cmd_archive(array $defs, array $tables, array $acf_fields = [], bool $acf_knows_everything = false): array
 {
@@ -1055,6 +1068,7 @@ function cmd_archive(array $defs, array $tables, array $acf_fields = [], bool $a
 }
 
 /**
+ * @param  list<array{0: string, 1: string}>  $columns
  * @return array<string, mixed>
  */
 function cmd_def(string $name, array $columns): array
@@ -1146,7 +1160,7 @@ it('pages a table with an id by the last id it read', function (): void {
     $manifest = json_decode((string) file_get_contents($env['dir'].'/site-7-manifest.json'), true);
 
     expect($manifest['tables'][0]['rows'])->toBe(501)
-        ->and(count(file($env['dir'].'/site-7-wp_provider.jsonl')))->toBe(501);
+        ->and(file($env['dir'].'/site-7-wp_provider.jsonl'))->toHaveCount(501);
 });
 
 it('pages a table with no id by offset', function (): void {
@@ -1167,7 +1181,7 @@ it('pages a table with no id by offset', function (): void {
         ['SELECT * FROM `wp_provider` LIMIT 500 OFFSET 500', ARRAY_A],
         'SHOW COLUMNS FROM `wp_provider`',
     ])
-        ->and(count(file($env['dir'].'/site-7-wp_provider.jsonl')))->toBe(501);
+        ->and(file($env['dir'].'/site-7-wp_provider.jsonl'))->toHaveCount(501);
 });
 
 it('writes no orphan file when every column is mapped to an ACF field or is a key column', function (): void {

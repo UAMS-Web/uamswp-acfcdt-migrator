@@ -58,6 +58,7 @@ namespace UAMSWP_ACFCDT_Migrator {
 
     /**
      * @param  array<int, mixed>  $descriptors
+     * @param  array<int, resource>|null  $pipes
      *
      * @param-out array<int, resource>  $pipes
      *

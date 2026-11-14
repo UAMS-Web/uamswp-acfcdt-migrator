@@ -157,6 +157,7 @@ afterEach(function (): void {
  *
  * @param  array<string, mixed>  $meta  `"<post>:<meta_key>" => value` rows the stand-in postmeta holds
  * @param  array<string, mixed>  $field
+ * @return array<string, mixed>
  */
 function eng_bw_run(array $meta, array $field = ['name' => 'physician_expertise', 'key' => 'field_expertise_physicians', 'type' => 'text'], int $post_id = 55): array
 {
@@ -175,7 +176,11 @@ function eng_bw_run(array $meta, array $field = ['name' => 'physician_expertise'
     return (new Engine)->backfill_batch('r1', 0, 10);
 }
 
-/** The recorded `Store::put()` calls of one kind. */
+/**
+ * The recorded `Store::put()` calls of one kind.
+ *
+ * @return list<array<int, mixed>>
+ */
 function eng_bw_puts(string $kind): array
 {
     return array_values(array_filter($GLOBALS['eng_bw_state']['puts'], fn (array $p): bool => $p[0] === $kind));

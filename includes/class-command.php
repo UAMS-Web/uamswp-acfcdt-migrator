@@ -43,6 +43,9 @@ class Command
      * : table or json. Default: table.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function inventory($args, $assoc): void
     {
@@ -121,6 +124,9 @@ class Command
      * : Override table JSON directory.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function archive($args, $assoc): void
     {
@@ -245,6 +251,9 @@ class Command
      * : Override table JSON directory.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function snapshot($args, $assoc): void
     {
@@ -305,6 +314,9 @@ class Command
      * : How many differences to print. Default: 25.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function compare($args, $assoc): void
     {
@@ -369,6 +381,9 @@ class Command
      * : Override table JSON directory.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function backfill($args, $assoc): void
     {
@@ -440,6 +455,9 @@ class Command
      * : Roll back again even if already rolled back.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function rollback($args, $assoc): void
     {
@@ -483,6 +501,9 @@ class Command
      * : Every site that has custom tables.
      *
      * @when after_wp_load
+     *
+     * @param  array<int, string>  $args  Positional arguments.
+     * @param  array<string, mixed>  $assoc  Flags and options.
      */
     public function status($args, $assoc): void
     {
@@ -511,6 +532,8 @@ class Command
     /**
      * If --network is set, re-run the subcommand once per site with custom tables, each in its own process.
      *
+     * @param  array<int, string>  $args
+     * @param  array<string, mixed>  $assoc
      * @return bool true if it handled the call
      */
     private function maybe_network(string $sub, $args, $assoc): bool
@@ -586,6 +609,8 @@ class Command
     /**
      * Like WP_CLI::launch_self(), but streams the child's output live instead of buffering it.
      *
+     * @param  array<int, string>  $args
+     * @param  array<string, mixed>  $assoc
      * @return int exit code
      */
     private function run_child(string $command, $args, $assoc, string $url): int
@@ -626,6 +651,9 @@ class Command
         WP_CLI::log(WP_CLI::colorize("%Y### Site {$site->blog_id}: {$site->url}%n"));
     }
 
+    /**
+     * @param  array<string, mixed>  $assoc
+     */
     private function engine($assoc): Engine
     {
         if (! Engine::acf_ready()) {
@@ -635,6 +663,10 @@ class Command
         return new Engine(new Site(get_flag_value($assoc, 'json-dir')));
     }
 
+    /**
+     * @param  array<string, mixed>  $assoc
+     * @return array<int, int>|null
+     */
     private function ids($assoc): ?array
     {
         $ids = get_flag_value($assoc, 'ids');
@@ -642,7 +674,10 @@ class Command
         return $ids ? array_filter(array_map(absint(...), explode(',', $ids))) : null;
     }
 
-    private function preview($v)
+    /**
+     * @param  mixed  $v
+     */
+    private function preview($v): string
     {
         $s = $v === null ? '(empty)' : Normalizer::json($v);
 
