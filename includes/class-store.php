@@ -129,6 +129,8 @@ class Store
         do {
             $batch = self::rows($kind, $ref, $after, 1000);
             foreach ($batch as $r) {
+                // A numeric string key becomes an integer key, so the cast changes nothing.
+                // @pest-mutate-ignore: RemoveIntegerCast
                 $out[(int) $r->post_id] = json_decode($r->data, true);
                 $after = (int) $r->id;
             }
@@ -152,6 +154,8 @@ class Store
     public static function delete(array $kinds, $ref)
     {
         global $wpdb;
+        // The first index array_fill() numbers from is discarded by implode().
+        // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($kinds), '%s'));
 
         return $wpdb->query($wpdb->prepare(
@@ -191,7 +195,7 @@ class Store
             'change',
             $stamp
         ));
-        $stats = ['fields' => 0, 'fill' => 0, 'overwrite' => 0, 'clear' => 0, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0, 'posts' => 0];
+        $stats = ['fields' => 0, 'fill' => 0, 'overwrite' => 0, 'clear' => 0, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0];
         $posts = [];
         $by = [];
         foreach ($rows as $json) {
@@ -210,6 +214,8 @@ class Store
                 $stats['write_mismatch']++;
             }
 
+            // Only the keys are counted, so the value stored makes no difference.
+            // @pest-mutate-ignore: TrueToFalse
             $posts[$c['post_id']] = true;
             $k = $c['post_type'].'.'.$c['field'];
             $by[$k] ??= ['field' => $k, 'fill' => 0, 'overwrite' => 0, 'clear' => 0];
