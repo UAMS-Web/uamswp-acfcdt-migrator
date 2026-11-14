@@ -8,6 +8,13 @@
  * `snapshot_batch()` issues and records what it was handed; whether MySQL accepts the SQL is for the Integration
  * suite. `Normalizer` is real: the values and the equality check it gives are part of what these methods do.
  *
+ * The mutants this file owns are those in `includes/class-engine.php` lines 230 to 377. Mutation run: `vendor/bin/pest
+ * tests/Unit/EngineSnapshotTest.php --mutate --path=includes --class='UAMSWP_ACFCDT_Migrator\Engine'
+ * --covered-only`, 165 mutants of which 159 are killed and 6 survive, all six on lines 21, 85 and 88 (the inventory
+ * slice's lines, which this file only reaches in passing), none in range, no timeouts (macOS, PHP 8.4.27, PCOV; a
+ * working run, not the Linux run that closes the coverage ticket). One annotation in the source, an equivalent mutant:
+ * the status default in `compare()` never equals `'complete'`.
+ *
  * Helper names carry the `eng_snap` prefix so the sibling Engine test files can define their own without a clash.
  *
  * @see includes/class-engine.php
@@ -312,12 +319,12 @@ function eng_snap_fields(): array
  */
 function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, string $label = 'before', mixed $cursor = 0, int $limit = 25, mixed $ids = null): array
 {
-    redefine(Site::class.'::fields_for_post', function (int $id, string $type) use ($calls): array {
+    redefine(Site::class.'::fields_for_post', function (mixed $id, mixed $type) use ($calls): array {
         $calls[] = ['fields_for_post', $id, $type];
 
         return eng_snap_fields();
     });
-    when('acf_get_value')->alias(function (int $id, array $field) use ($calls, $values): mixed {
+    when('acf_get_value')->alias(function (mixed $id, array $field) use ($calls, $values): mixed {
         $calls[] = ['acf_get_value', $id, $field['key']];
 
         return $values[$id][$field['key']] ?? null;
