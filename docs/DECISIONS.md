@@ -35,3 +35,14 @@ Every entry heading is `## YYYY-MM-DD`, a space, and a short title. Leave exactl
 **Rejected.** ACF free from wordpress.org in CI with the real stack only locally: it runs without a secret, but tests a different ACF than production runs and leaves CI and local runs without parity. No ACF, with a fixture standing in: cheapest, but nothing in the suite would exercise ACF, so it cannot catch a defect like #57. ACF Pro with a license secret in the same slice: deferred, because the secret and a source for the Custom Database Tables beta are not decided.
 
 **Companion.** [#45](https://github.com/UAMS-Web/uamswp-acfcdt-migrator/issues/45).
+
+## 2026-11-14 Extract the plugin file's load-time branching and exclude the thin shim from coverage (#55)
+
+**Decision.** The branching in `uamswp-acfcdt-migrator.php` (the `WP_CLI` command registration, `Admin::init()` under `is_admin()` and the require sequence) moves into one class under `includes/`, behavior unchanged and `wp --require` loading preserved. The plugin file is left as the double-load guard, the two `define()` calls, one require and one call into that class, and that thin file is excluded from the coverage source with the reason recorded in `phpunit.xml`. The class is in the measured population and gets unit tests. The build is #67 and the exclusion is #68.
+
+**Why.** A Unit test reaches the file's body once per process, because the constants make a second load return at the guard, and per-test process isolation fails on this build (`#[RunInSeparateProcess]` dies in the child on a missing PHPUnit class). With one fresh load and one guard load, a measured Unit run produced 31 mutants, 26 tested, 1 untested and 4 uncovered (83.87%), so the file cannot reach full coverage as it stands. In a class under `includes/`, every branch is reachable in one process through the namespace shims the suite already uses.
+
+**Rejected.** Exclude the whole file as it stands: leaves four branches of real behavior unmeasured and unpinned. Cover it in the Integration suite (#45, built in #62): measures it only where the real plugin stack runs, and the Unit population would still list the file at 0.0%. Include it in the Unit suite with Brain Monkey expectations: measured at 83.87%, and the remainder cannot be reached without process isolation.
+
+**Companion.** [#55](https://github.com/UAMS-Web/uamswp-acfcdt-migrator/issues/55).
+
