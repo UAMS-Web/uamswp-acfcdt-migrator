@@ -21,7 +21,11 @@ if (defined('UAMSWP_ACFCDT_MIGRATOR_FILE')) {
 }
 
 define('UAMSWP_ACFCDT_MIGRATOR_FILE', __FILE__);
-define('UAMSWP_ACFCDT_MIGRATOR_VERSION', '0.2.2');
+// The header's Version is the only place the release number is written. `wp --require` runs before WordPress has
+// loaded `get_file_data()`, and nothing reads the constant, so it is defined only where the function exists.
+if (function_exists('get_file_data')) {
+    define('UAMSWP_ACFCDT_MIGRATOR_VERSION', get_file_data(__FILE__, ['Version' => 'Version'])['Version']);
+}
 
 require_once __DIR__.'/includes/class-hook-guard.php';
 require_once __DIR__.'/includes/class-normalizer.php';
