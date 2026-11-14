@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace UAMSWP_ACFCDT_Migrator;
 
+use ACFCustomDatabaseTables\Core;
+
 /**
  * Switches ACF Custom Database Tables' intercepts off and on inside a single PHP process.
  *
@@ -64,7 +66,7 @@ class HookGuard
 
     public static function plugin_loaded(): bool
     {
-        return function_exists('acf_custom_database_tables') || class_exists('ACFCustomDatabaseTables\\Core', false);
+        return function_exists('acf_custom_database_tables') || class_exists(Core::class, false);
     }
 
     public function has_intercepts(): bool
