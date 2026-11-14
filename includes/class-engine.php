@@ -326,6 +326,8 @@ class Engine
         }
 
         foreach ([$a => $ia, $b => $ib] as $ref => $info) {
+            // The default never equals 'complete', whatever its value.
+            // @pest-mutate-ignore: EmptyStringToNotEmpty
             if (($info['status'] ?? '') !== 'complete') {
                 throw new \RuntimeException("Snapshot '$ref' is incomplete — resume or re-run it first.");
             }
