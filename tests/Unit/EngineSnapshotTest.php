@@ -64,7 +64,7 @@ function eng_snap_wire(array $answers = []): ArrayObject
     $note = function (string $name, array $args) use ($st): void {
         $log = $st['log'];
         $log[] = [$name, ...$args];
-        $st['log'] = $log;
+        $st->offsetSet('log', $log);
     };
 
     redefine(Store::class.'::get', function (...$args) use ($note, $answers): mixed {

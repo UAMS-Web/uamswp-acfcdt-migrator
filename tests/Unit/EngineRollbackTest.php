@@ -46,7 +46,7 @@ function eng_rb_wire(array $o = []): ArrayObject
     $note = function (string $name, array $args = []) use ($st): void {
         $log = $st['log'];
         $log[] = [$name, ...$args];
-        $st['log'] = $log;
+        $st->offsetSet('log', $log);
     };
 
     redefine(Store::class.'::get', function (...$a) use ($note, $o): mixed {
@@ -92,7 +92,7 @@ function eng_rb_wpdb(ArrayObject $st): void
     $wpdb->shouldReceive('insert')->andReturnUsing(function (...$a) use ($st): int {
         $log = $st['log'];
         $log[] = ['insert', ...$a, 'argc='.count($a)];
-        $st['log'] = $log;
+        $st->offsetSet('log', $log);
 
         return 1;
     });

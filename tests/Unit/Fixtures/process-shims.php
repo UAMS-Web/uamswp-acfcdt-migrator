@@ -58,12 +58,16 @@ namespace UAMSWP_ACFCDT_Migrator {
 
     /**
      * @param  array<int, mixed>  $descriptors
-     * @param  array<int, resource>  $pipes
+     *
+     * @param-out array<int, resource>  $pipes
+     *
      * @return resource|false
      */
     function proc_open(string $command, array $descriptors, ?array &$pipes = null): mixed
     {
         \CommandTestProcess::$calls[] = ['open', $command, $descriptors];
+        // No pipes are handed back: the child's output is not read in these tests.
+        $pipes = [];
 
         return \CommandTestProcess::$handle;
     }
@@ -75,6 +79,7 @@ namespace UAMSWP_ACFCDT_Migrator {
     {
         \CommandTestProcess::$calls[] = ['close'];
 
-        return \CommandTestProcess::$exit;
+        // Like the real function, answer -1 for a handle that is not the one `proc_open()` returned.
+        return $process === \CommandTestProcess::$handle ? \CommandTestProcess::$exit : -1;
     }
 }

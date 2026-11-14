@@ -46,7 +46,7 @@ parameters:
     # The highest level the code passes today (see the code-quality skill); raised
     # by one per change as findings are fixed, until `max`. Lowering it is a
     # deliberate, argued change.
-    level: 3
+    level: 4
 
     # First-party PHP: the includes, the plugin header file and the tests.
     paths:
@@ -81,6 +81,11 @@ parameters:
     # Paths are relative to this neon file (repository root). wordpress-stubs
     # is already loaded by szepeviktor/phpstan-wordpress; list only the WP-CLI
     # stub files here.
+    # Corrected signatures for the two ACF Pro functions whose stub declarations
+    # (`php-stubs/acf-pro-stubs` 6.8) contradict ACF's code; the file says which.
+    stubFiles:
+        - tests/stubs/acf-pro-overrides.stub
+
     scanFiles:
         - vendor/php-stubs/acf-pro-stubs/acf-pro-stubs.php
         - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
@@ -142,13 +147,6 @@ parameters:
     # an entry needs. With every entry commented out the key is empty, which
     # PHPStan reads as no entries.
     ignoreErrors:
-        # `php-stubs/acf-pro-stubs` 6.8 documents `acf_get_setting()` as `@return void`,
-        # but ACF returns the setting value, and `includes/class-site.php` reads it.
-        # The error is in the stub, not in the code; the entry goes when the stub is fixed.
-        -
-            identifier: function.void
-            message: '#^Result of function acf_get_setting \(void\) is used\.$#'
-            path: includes/class-site.php
         # The entry most plugins need once the level reaches 4, from
         # aether-wordpress-migration-api: the PHP version guard in the plugin header.
         # PHPStan analyzes at the `min` above, so

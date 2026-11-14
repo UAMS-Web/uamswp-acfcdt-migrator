@@ -141,6 +141,7 @@ it('lists snapshots and runs as one table', function (): void {
                 'run-b' => ['stats' => ['fields' => 9, 'write_mismatch' => 2], 'status' => 'done', 'created' => '2026-01-04'],
                 'run-c' => ['created' => '2026-01-05'],
             ],
+            default => throw new LogicException("Unexpected header kind: $kind"),
         },
         'change_summary' => fn ($stamp): array => ['stats' => ['fields' => 3, 'write_mismatch' => 1]],
     ]);
@@ -1209,7 +1210,7 @@ it('treats a column mapped to an identifier with no ACF field as an orphan', fun
 
 it('counts a column with no mapped identifier as an orphan even when ACF would answer for any name', function (): void {
     $sql = "SELECT `e_post_id`,`e_col_c` FROM `wp_provider` WHERE (`e_col_c` IS NOT NULL AND `e_col_c` <> '' AND `e_col_c` <> '[]') ORDER BY post_id";
-    $env = cmd_archive(
+    cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'col_a', 'col_c'], 'results' => [
             'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
