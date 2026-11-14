@@ -33,19 +33,19 @@ On each site that has the custom tables:
 1. **Back up the database.** On Local that's `wp db export`, or Local's own backup feature.
 2. **1. Inventory & archive:** review the inventory, then download *all rows* (JSONL) and the *orphaned columns* (CSV) for each table.
 3. **2. Snapshots:** take `before` in mode **effective**.
-4. **3. Backfill:** run with **Dry run ✓**, then open *By field* / *Changes* on the run and review:
+4. **3. Backfill:** run with **Dry run** ticked, then open *By field* / *Changes* on the run and review:
    - `fill` — postmeta was empty (expected for most rows)
    - `overwrite` — postmeta held an old value from before the bypass
    - `clear` — the table is empty but postmeta held an outdated value
 5. **3. Backfill:** untick **Dry run** and run it for real. **Mismatches must be 0.**
 6. Run another **dry run**. It must show **0 / 0**. The only exception is fields flagged **invalid**: a corrupted ID in the custom table (e.g. `"10522]"`). Those are never written. Fix the post by hand with the plugin active (re-select the value and save), then run the backfill again.
 7. **2. Snapshots:** take `after-meta` in mode **meta**.
-8. **4. Compare:** `before` vs `after-meta` must show **✔ Identical**.
+8. **4. Compare:** `before` vs `after-meta` must show **Identical**.
 
 Then, once for the whole network:
 
 9. **Network Admin → Plugins:** network-deactivate *ACF Custom Database Tables*.
-10. On each site, take snapshot `after-off`, then compare `before` vs `after-off`. It must show **✔ Identical**.
+10. On each site, take snapshot `after-off`, then compare `before` vs `after-off`. It must show **Identical**.
 11. Click through provider profiles, location pages, and the Providers/Locations blocks filtered by location and area of expertise. Rebuild the FacetWP index.
 12. Practise going back:
     - reactivate the plugin, then use **Roll back** on the real run (it restores the original postmeta exactly, including the rows ACF rewrites on related posts through bidirectional relationships), **or**
