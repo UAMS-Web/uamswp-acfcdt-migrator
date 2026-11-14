@@ -1,0 +1,25 @@
+<?php
+
+/**
+ * Corrected signatures for two ACF Pro functions whose `php-stubs/acf-pro-stubs` 6.8 declarations disagree with
+ * ACF's own code. PHPStan reads this file through `stubFiles`, which takes precedence over the scanned stub, so the
+ * plugin's source keeps the guards it needs and no `ignoreErrors` entry stands in for the stub.
+ */
+
+/**
+ * The stub says `@return void`; ACF returns the setting's value.
+ *
+ * @param  string  $name
+ * @param  mixed  $value
+ * @return mixed
+ */
+function acf_get_setting($name, $value = null) {}
+
+/**
+ * The stub says `@return ACF_Data`, a class declared inside a `class_exists()` guard that PHPStan cannot resolve;
+ * ACF returns the store, or `false` when no store has that name.
+ *
+ * @param  string  $name
+ * @return mixed
+ */
+function acf_get_store($name = '') {}

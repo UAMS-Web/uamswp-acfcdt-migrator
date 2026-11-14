@@ -64,7 +64,7 @@ function eng_bf_wire(array $o = []): ArrayObject
     $note = function (string $name, array $args = []) use ($st): void {
         $log = $st['log'];
         $log[] = [$name, ...$args];
-        $st['log'] = $log;
+        $st->offsetSet('log', $log);
     };
 
     redefine(Store::class.'::get', function (...$a) use ($note, $o): mixed {
