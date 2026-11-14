@@ -8,9 +8,9 @@
 
 declare(strict_types=1);
 
-use function Brain\Monkey\Functions\when;
-use Brain\Monkey\Functions;
 use UAMSWP_ACFCDT_Migrator\Normalizer;
+
+use function Brain\Monkey\Functions\when;
 
 it('treats every empty form as the same empty value', function (mixed $raw): void {
     expect(Normalizer::value(['type' => 'text'], $raw))->toBeNull();
