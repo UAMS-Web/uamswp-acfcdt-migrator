@@ -199,7 +199,7 @@ function eng_bf_calls(ArrayObject $st, string ...$names): array
  */
 function eng_bf_order(ArrayObject $st): array
 {
-    return array_map(fn (array $row): string => $row[0], $st['log']);
+    return array_values(array_map(fn (array $row): string => $row[0], $st['log']));
 }
 
 /**
@@ -312,6 +312,10 @@ it('stamps a generated name with the current UTC time', function (): void {
     $stamp = (new Engine)->backfill_start(false, false);
 
     $parsed = DateTimeImmutable::createFromFormat('Ymd-His', $stamp, new DateTimeZone('UTC'));
+    if ($parsed === false) {
+        throw new LogicException('The generated stamp does not parse as Ymd-His.');
+    }
+
     expect($parsed)->not->toBeFalse()
         ->and($parsed->getTimestamp())->toBeGreaterThanOrEqual($before - 1)
         ->and($parsed->getTimestamp())->toBeLessThanOrEqual((int) gmdate('U') + 1);
@@ -529,6 +533,10 @@ it('orders a live write: backup, write, cache flush, read back, change record, p
 
     $names = eng_bf_order($st);
     $from = array_search('meta_rows_for_field', $names, true);
+    if ($from === false) {
+        throw new LogicException('meta_rows_for_field was not logged.');
+    }
+
     expect(array_slice($names, $from))->toBe([
         'meta_rows_for_field', 'put', 'acf_update_value',
         'guard.flush', 'wp_cache_delete', 'acf_get_value.off',

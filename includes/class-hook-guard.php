@@ -23,7 +23,11 @@ class HookGuard
     /** @var list<array{0: string, 1: mixed, 2: int, 3: mixed}> [hook, callable, priority, accepted_args] */
     private array $callbacks = [];
 
-    /** @var object[] ACFGetFieldIntercept instances (have per-request caches we need to clear). */
+    /**
+     * The `reset()` of each ACFGetFieldIntercept instance, which keeps per-request caches we need to clear.
+     *
+     * @var array<string, \Closure>
+     */
     private array $get_intercepts = [];
 
     private bool $detached = false;
@@ -57,7 +61,7 @@ class HookGuard
                     $this->callbacks[] = [$hook, $fn, $priority, $cb['accepted_args']];
 
                     if (str_ends_with($class, 'ACFGetFieldIntercept') && method_exists($fn[0], 'reset')) {
-                        $this->get_intercepts[spl_object_hash($fn[0])] = $fn[0];
+                        $this->get_intercepts[spl_object_hash($fn[0])] = $fn[0]->reset(...);
                     }
                 }
             }
@@ -128,8 +132,8 @@ class HookGuard
      */
     public function reset_caches(): void
     {
-        foreach ($this->get_intercepts as $intercept) {
-            $intercept->reset();
+        foreach ($this->get_intercepts as $reset) {
+            $reset();
         }
 
         self::flush_acf_values();

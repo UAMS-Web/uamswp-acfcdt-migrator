@@ -260,13 +260,13 @@ it('skips a file that is not a table definition for a post type', function (stri
 ]);
 
 it('keeps reading after a file it skips', function (): void {
-    $dir = site_dir(['a.json' => '{nope', 'b.json' => json_encode(['name' => 'n', 'relationship' => ['type' => 'user']]), 'c.json' => site_def('ok', 'p')]);
+    $dir = site_dir(['a.json' => '{nope', 'b.json' => json_encode(['name' => 'n', 'relationship' => ['type' => 'user']], JSON_THROW_ON_ERROR), 'c.json' => site_def('ok', 'p')]);
 
     expect(array_keys((new Site($dir))->table_defs()))->toBe(['ok']);
 });
 
 it('treats a definition with no columns, or columns that are not a list, as having none', function (): void {
-    $dir = site_dir(['a.json' => json_encode(['name' => 'n', 'relationship' => ['type' => 'post', 'post_type' => 'p']]), 'b.json' => site_def('m', 'p', [], ['columns' => 'x'])]);
+    $dir = site_dir(['a.json' => json_encode(['name' => 'n', 'relationship' => ['type' => 'post', 'post_type' => 'p']], JSON_THROW_ON_ERROR), 'b.json' => site_def('m', 'p', [], ['columns' => 'x'])]);
 
     $defs = (new Site($dir))->table_defs();
 
@@ -567,6 +567,7 @@ it('does not limit the IDs when none are given', function (mixed $ids): void {
 it('limits the number of posts, as an integer', function (mixed $limit, string $tail): void {
     [, $ran] = site_posts(['p'], null, $limit);
 
+    /** @var non-empty-string $tail */
     expect($ran[0])->toEndWith($tail);
 })->with([
     'none' => [0, ' ORDER BY ID ASC'],

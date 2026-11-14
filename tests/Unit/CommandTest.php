@@ -367,6 +367,14 @@ it('passes the ignored fields trimmed, with blanks dropped', function (): void {
     expect($seen->getArrayCopy())->toBe([0 => 'one', 1 => 'two', 3 => 'three']);
 });
 
+it('prints a difference value that cannot be encoded as JSON as such', function (): void {
+    cmd_engine(['compare' => fn ($a, $b, $ignore): array => cmd_compare_result([['post_id' => 1, 'title' => 'Post 1', 'field' => 'f', 'a' => ['k' => "\xB1"], 'b' => null]], ['changed' => 1])]);
+
+    expect(fn () => (new Command)->compare(['before', 'after'], []))->toThrow(RuntimeException::class, 'WP_CLI::halt: 1');
+
+    expect(cmd_calls('log'))->toContain('    before: (unencodable)');
+});
+
 it('prints each difference up to the limit, then warns and halts with 1', function (): void {
     $diffs = array_map(fn (int $i): array => ['post_id' => $i, 'title' => "Post $i", 'field' => "f$i", 'a' => "va$i", 'b' => null], range(1, 3));
     cmd_engine(['compare' => fn ($a, $b, $ignore): array => cmd_compare_result($diffs, ['changed' => 3])]);
@@ -1075,6 +1083,33 @@ function cmd_def(string $name, array $columns): array
 {
     return ['name' => $name, 'columns' => array_map(fn (array $c): array => ['name' => $c[0], 'identifier' => $c[1]], $columns)];
 }
+
+it('stops the archive of a table whose JSON lines file cannot be written', function (): void {
+    cmd_archive(
+        [cmd_def('provider', [['col_a', 'field_a']])],
+        ['wp_provider' => ['columns' => ['id', 'col_a'], 'results' => []]],
+        ['field_a']
+    );
+    CommandTestProcess::$failOpen = '.jsonl';
+
+    expect(fn () => (new Command)->archive([], ['stamp' => 's']))->toThrow(RuntimeException::class, 'WP_CLI::error: Cannot write ');
+});
+
+it('stops the archive of a table whose orphaned-columns file cannot be written', function (): void {
+    $sql = "SELECT `e_post_id`,`e_col_c` FROM `wp_provider` WHERE (`e_col_c` IS NOT NULL AND `e_col_c` <> '' AND `e_col_c` <> '[]') ORDER BY post_id";
+    $env = cmd_archive(
+        [cmd_def('provider', [['col_a', 'field_a']])],
+        ['wp_provider' => ['columns' => ['id', 'col_a', 'col_c'], 'results' => [
+            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
+            $sql => [],
+        ]]],
+        ['field_a']
+    );
+    CommandTestProcess::$failOpen = 'orphan-columns.csv';
+
+    expect(fn () => (new Command)->archive([], ['stamp' => 's']))->toThrow(RuntimeException::class, 'WP_CLI::error: Cannot write ')
+        ->and(file_exists($env['dir'].'/site-7-wp_provider.jsonl'))->toBeTrue();
+});
 
 it('archives a table to JSON lines, its orphaned columns to CSV, and a manifest', function (): void {
     $rows = [['id' => '1', 'post_id' => '10', 'col_a' => 'x'], ['id' => '2', 'post_id' => '11', 'col_a' => 'caf'."\u{e9}".'/']];

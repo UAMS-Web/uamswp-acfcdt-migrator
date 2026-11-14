@@ -46,7 +46,7 @@ parameters:
     # The highest level the code passes today (see the code-quality skill); raised
     # by one per change as findings are fixed, until `max`. Lowering it is a
     # deliberate, argued change.
-    level: 6
+    level: 7
 
     # First-party PHP: the includes, the plugin header file and the tests.
     paths:

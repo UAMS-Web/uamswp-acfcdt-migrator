@@ -149,7 +149,7 @@ function eng_rb_calls(ArrayObject $st, string ...$names): array
  */
 function eng_rb_order(ArrayObject $st): array
 {
-    return array_map(fn (array $row): string => $row[0], $st['log']);
+    return array_values(array_map(fn (array $row): string => $row[0], $st['log']));
 }
 
 /** The dash the messages hold, written as an escape so no literal U+2014 sits in this file. */
@@ -305,6 +305,10 @@ it('deletes the field rows, then puts each backed up row back', function (): voi
 
     $names = eng_rb_order($st);
     $from = array_search('delete_meta_rows_for_field', $names, true);
+    if ($from === false) {
+        throw new LogicException('delete_meta_rows_for_field was not logged.');
+    }
+
     expect(array_slice($names, $from, 3))->toBe(['delete_meta_rows_for_field', 'insert', 'insert'])
         ->and(eng_rb_calls($st, 'delete_meta_rows_for_field'))->toBe([['delete_meta_rows_for_field', 7, 'name', false]])
         ->and(eng_rb_calls($st, 'insert'))->toBe([
@@ -362,6 +366,10 @@ it('clears each post cache once, after every row is restored', function (): void
 
     $names = eng_rb_order($st);
     $first = array_search('clean_post_cache', $names, true);
+    if ($first === false) {
+        throw new LogicException('clean_post_cache was not logged.');
+    }
+
     expect(array_slice($names, $first))->toBe(['clean_post_cache', 'wp_cache_delete', 'clean_post_cache', 'wp_cache_delete', 'get', 'put'])
         ->and(array_slice($names, 0, $first))->not->toContain('clean_post_cache');
 });

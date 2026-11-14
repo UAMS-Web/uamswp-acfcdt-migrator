@@ -215,7 +215,7 @@ class Site
      * Every post of the given types except auto-drafts and revisions (trash and drafts included on purpose).
      *
      * @param  list<string>  $types
-     * @param  int|string|list<int|string>|null  $ids  Restrict to these post IDs.
+     * @param  array<int, int|string>|int|string|null  $ids  Restrict to these post IDs.
      * @param  int|string  $limit  `0` for no limit.
      * @return array<int, \stdClass>|null {ID, post_type, post_status, post_title, post_modified}
      */

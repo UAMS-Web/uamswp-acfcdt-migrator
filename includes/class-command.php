@@ -146,6 +146,12 @@ class Command
             $table = $site->prefixed($def['name']);
             $file = "$dir/site-{$site->blog_id}-{$table}.jsonl";
             $fh = fopen($file, 'w');
+            if ($fh === false) {
+                WP_CLI::error("Cannot write $file");
+
+                return;
+            }
+
             $count = 0;
             $last = 0;
             $has_id = in_array('id', $wpdb->get_col("SHOW COLUMNS FROM `$table`"), true);
@@ -166,6 +172,7 @@ class Command
             fclose($fh);
 
             // Orphaned columns: mapped identifier has no ACF field, or column not in JSON at all.
+            /** @var list<string> $db_cols The column names, which `SHOW COLUMNS` returns as strings. */
             $db_cols = $wpdb->get_col("SHOW COLUMNS FROM `$table`");
             $def_cols = array_column($def['columns'], 'identifier', 'name');
             $orphans = [];
@@ -191,6 +198,12 @@ class Command
                 }, $orphans));
                 $rows = $wpdb->get_results("SELECT $quoted FROM `$table` WHERE $where ORDER BY post_id", ARRAY_A);
                 $oh = fopen($orphan_file, 'w');
+                if ($oh === false) {
+                    WP_CLI::error("Cannot write $orphan_file");
+
+                    return;
+                }
+
                 // The escape character is passed as its current default: omitting it is deprecated as of PHP 8.4.
                 fputcsv($oh, $cols, ',', '"', '\\');
                 foreach ($rows as $r) {
@@ -679,7 +692,7 @@ class Command
      */
     private function preview($v): string
     {
-        $s = $v === null ? '(empty)' : Normalizer::json($v);
+        $s = $v === null ? '(empty)' : (Normalizer::json($v) ?: '(unencodable)');
 
         return strlen($s) > 160 ? substr($s, 0, 157).'...' : $s;
     }

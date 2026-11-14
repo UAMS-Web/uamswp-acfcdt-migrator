@@ -48,7 +48,7 @@ class Admin
     }
 
     /**
-     * @param  int|string|null  $blog_id  The site whose screen to link to; the current site when empty.
+     * @param  int|null  $blog_id  The site whose screen to link to; the current site when empty.
      * @return string
      */
     private static function page_url($blog_id = null)
@@ -79,8 +79,9 @@ class Admin
         echo '<table class="widefat striped"><thead><tr><th>Site</th><th>Tables</th><th>Snapshots</th><th>Latest backfill</th><th></th></tr></thead><tbody>';
         $any = false;
         foreach (get_sites(['number' => 0, 'deleted' => 0]) as $s) {
-            // A `WP_Site` holds its ID as a numeric string; `switch_to_blog()` takes an integer.
-            switch_to_blog((int) $s->blog_id);
+            // A `WP_Site` holds its ID as a numeric string; `switch_to_blog()` and `get_admin_url()` take an integer.
+            $blog_id = (int) $s->blog_id;
+            switch_to_blog($blog_id);
             $site = new Site;
             $tables = array_keys($site->active_defs());
             if ($tables !== []) {
@@ -99,16 +100,14 @@ class Admin
                 foreach ($snaps as $ref => $i) {
                     $snap_list[] = esc_html($ref).(($i['status'] ?? null) === 'complete' ? '' : ' <em>(incomplete)</em>');
                 }
-                // `%d` converts to an integer itself.
-                // @pest-mutate-ignore: RemoveIntegerCast
                 printf(
                     '<tr><td><strong>%d</strong> %s</td><td>%s</td><td>%s</td><td>%s</td><td><a class="button" href="%s">Open</a></td></tr>',
-                    (int) $s->blog_id,
+                    $blog_id,
                     esc_html($s->domain.$s->path),
                     esc_html(implode(', ', $tables)),
                     $snap_list !== [] ? implode(', ', $snap_list) : '—',
                     $latest,
-                    esc_url(self::page_url($s->blog_id))
+                    esc_url(self::page_url($blog_id))
                 );
             }
             restore_current_blog();
@@ -292,7 +291,9 @@ class Admin
             foreach ($items as $ref => $i) {
                 $status = $i['status'] ?? '?';
                 $posts = Store::count('snapshot', $ref);
-                $progress = $status === 'complete' ? $posts : $engine->posts_upto($i['cursor'] ?? 0).' / '.(isset($i['total']) ? (int) $i['total'] : '?');
+                // `esc_html()` converts an integer itself.
+                // @pest-mutate-ignore: RemoveStringCast
+                $progress = $status === 'complete' ? (string) $posts : $engine->posts_upto($i['cursor'] ?? 0).' / '.(isset($i['total']) ? (int) $i['total'] : '?');
                 // The cursor and total sit in `%d` slots, which convert to an integer themselves.
                 // @pest-mutate-ignore: RemoveIntegerCast
                 printf(
@@ -445,7 +446,7 @@ class Admin
      */
     private static function preview($v)
     {
-        $s = $v === null ? '(empty)' : (is_string($v) ? $v : Normalizer::json($v));
+        $s = $v === null ? '(empty)' : (is_string($v) ? $v : (Normalizer::json($v) ?: '(unencodable)'));
 
         return mb_strlen($s) > 300 ? mb_substr($s, 0, 297).'…' : $s;
     }
@@ -487,6 +488,10 @@ class Admin
                         $orphans = $engine->orphan_columns($defs[$name]);
                         self::headers("site-$blog-$table-orphan-columns.csv", 'text/csv');
                         $out = fopen('php://output', 'w');
+                        if ($out === false) {
+                            throw new \RuntimeException('Cannot open the output stream.');
+                        }
+
                         fputcsv($out, array_merge(['post_id'], $orphans), ',', '"', '\\');
                         $engine->each_table_row($name, function ($row) use ($out, $orphans): void {
                             $vals = [];

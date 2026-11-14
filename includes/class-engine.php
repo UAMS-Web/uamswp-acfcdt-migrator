@@ -196,7 +196,7 @@ class Engine
      * DB columns whose identifier has no ACF field, or that aren't in the JSON at all.
      *
      * @param  array<string, mixed>  $def  A table definition, as `Site::table_defs()` returns it.
-     * @return mixed[]
+     * @return list<string>
      */
     public function orphan_columns(array $def): array
     {
@@ -286,7 +286,7 @@ class Engine
     }
 
     /**
-     * @param  int|string  $label
+     * @param  string  $label
      * @param  int|string  $cursor  Last post ID already handled.
      * @param  int  $limit
      * @param  array<int, int|string>|null  $ids
@@ -450,7 +450,7 @@ class Engine
     }
 
     /**
-     * @param  int|string  $stamp
+     * @param  string  $stamp
      * @param  int|string  $cursor  Last post ID already handled.
      * @param  int  $limit
      * @param  array<int, int|string>|null  $ids
@@ -665,7 +665,7 @@ class Engine
      * Restores postmeta from backups, newest first (so overlapping key patterns such as
      * location_phone / location_phone_numbers unwind correctly). Cursor is the backup row id.
      *
-     * @param  int|string  $stamp
+     * @param  string  $stamp
      * @param  int|string  $cursor
      * @param  int  $limit
      * @return array{processed: int, cursor: int|string, done: bool}

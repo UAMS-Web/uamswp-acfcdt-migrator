@@ -553,7 +553,7 @@ it('returns an empty array when there are no headers', function (): void {
  */
 function store_change(string $category, string $type, string $field, int $post, array $flags = []): string
 {
-    return json_encode(['category' => $category, 'post_type' => $type, 'field' => $field, 'post_id' => $post] + $flags);
+    return json_encode(['category' => $category, 'post_type' => $type, 'field' => $field, 'post_id' => $post] + $flags, JSON_THROW_ON_ERROR);
 }
 
 it('reads the change rows of one run', function (): void {

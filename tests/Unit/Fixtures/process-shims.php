@@ -24,18 +24,37 @@ namespace {
 
             public static string|false $env = false;
 
+            /** A path fragment: `fopen()` answers `false` for a file whose name contains it. Empty opens every file. */
+            public static string $failOpen = '';
+
             public static function reset(): void
             {
                 self::$calls = [];
                 self::$handle = false;
                 self::$exit = 0;
                 self::$env = false;
+                self::$failOpen = '';
             }
         }
     }
 }
 
 namespace UAMSWP_ACFCDT_Migrator {
+    /**
+     * Opens the file, unless a test named a path fragment to refuse (`CommandTestProcess::$failOpen`), the way a
+     * full disk or an unwritable directory does.
+     *
+     * @return resource|false
+     */
+    function fopen(string $filename, string $mode): mixed
+    {
+        if (\CommandTestProcess::$failOpen !== '' && str_contains($filename, \CommandTestProcess::$failOpen)) {
+            return false;
+        }
+
+        return \fopen($filename, $mode);
+    }
+
     /**
      * Records the close, then closes: a plain file reads the same whether or not it was closed, so the call is the
      * only thing a test can see.

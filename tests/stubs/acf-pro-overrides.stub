@@ -1,25 +1,61 @@
 <?php
 
 /**
- * Corrected signatures for two ACF Pro functions whose `php-stubs/acf-pro-stubs` 6.8 declarations disagree with
- * ACF's own code. PHPStan reads this file through `stubFiles`, which takes precedence over the scanned stub, so the
- * plugin's source keeps the guards it needs and no `ignoreErrors` entry stands in for the stub.
+ * Corrected declarations for functions and classes whose published stubs disagree with the code they describe.
+ * PHPStan reads this file through `stubFiles`, which takes precedence over the scanned stubs, so the plugin's source
+ * keeps the guards and calls it needs and no `ignoreErrors` entry stands in for a stub.
  */
 
-/**
- * The stub says `@return void`; ACF returns the setting's value.
- *
- * @param  string  $name
- * @param  mixed  $value
- * @return mixed
- */
-function acf_get_setting($name, $value = null) {}
+namespace {
+    /**
+     * `php-stubs/acf-pro-stubs` 6.8 says `@return void`; ACF returns the setting's value.
+     *
+     * @param  string  $name
+     * @param  mixed  $value
+     * @return mixed
+     */
+    function acf_get_setting($name, $value = null) {}
 
-/**
- * The stub says `@return ACF_Data`, a class declared inside a `class_exists()` guard that PHPStan cannot resolve;
- * ACF returns the store, or `false` when no store has that name.
- *
- * @param  string  $name
- * @return mixed
- */
-function acf_get_store($name = '') {}
+    /**
+     * The stub says `@return ACF_Data`, a class declared inside a `class_exists()` guard that PHPStan cannot
+     * resolve; ACF returns the store, or `false` when no store has that name.
+     *
+     * @param  string  $name
+     * @return mixed
+     */
+    function acf_get_store($name = '') {}
+
+    /**
+     * WordPress documents the result as "in the same type as supplied"; `php-stubs/wordpress-stubs` says
+     * `string|array` either way, which makes every use of a string result ambiguous.
+     *
+     * @param  string|array<mixed>  $data
+     * @return ($data is string ? string : array<mixed>)
+     */
+    function esc_sql($data) {}
+}
+
+namespace WP_CLI {
+    /**
+     * `\WP_CLI\Utils\make_progress_bar()` hands back this class when output is quiet, and it answers every method
+     * call with nothing. `php-stubs/wp-cli-stubs` declares the class with `__call()`, which PHPStan does not read as
+     * accepting `tick()` and `finish()`, so the two methods a progress bar answers are named here.
+     *
+     * @method void tick(int $increment = 1, string|null $msg = null)
+     * @method void finish()
+     */
+    final class NoOp
+    {
+        /**
+         * @param  string  $key
+         * @param  mixed  $value
+         */
+        public function __set($key, $value): void {}
+
+        /**
+         * @param  string  $method
+         * @param  array<mixed>  $args
+         */
+        public function __call($method, $args): void {}
+    }
+}
