@@ -13,6 +13,9 @@ declare(strict_types=1);
 
 namespace UAMSWP_ACFCDT_Migrator\Tests\Integration;
 
+/**
+ * @phpstan-type Pinned array{main: string, version: string, sha256: string, alternates?: list<string>}
+ */
 final class PluginStack
 {
     /**
@@ -38,7 +41,11 @@ final class PluginStack
 
     /**
      * A fingerprint of every file under a plugin directory: SHA-256 over the sorted relative paths, each
-     * with the SHA-256 of its bytes. File names that only the operating system adds are left out.
+     * with the SHA-256 of its bytes after every CRLF is read as LF, and every backslash in a path read as a
+     * slash. File names that only the operating system adds are left out. The two rules are there because one
+     * plugin's published zip ships CRLF where a copy installed another way carries LF, and a Windows machine
+     * writes `src\file.php` where macOS and Linux write `src/file.php`; the same files must not fail the check
+     * for either.
      */
     public static function fingerprint(string $directory): string
     {
@@ -56,7 +63,15 @@ final class PluginStack
                 continue;
             }
 
-            $lines[] = substr($file->getPathname(), strlen($directory) + 1)."\t".hash_file('sha256', $file->getPathname());
+            $bytes = file_get_contents($file->getPathname());
+
+            if ($bytes === false) {
+                throw new \RuntimeException('Cannot read '.$file->getPathname().' to fingerprint it.');
+            }
+
+            $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($directory) + 1));
+
+            $lines[] = $relative."\t".hash('sha256', str_replace("\r\n", "\n", $bytes));
         }
 
         sort($lines, SORT_STRING);
@@ -68,10 +83,10 @@ final class PluginStack
      * The pinned stack read out of the manifest file's JSON, with every entry checked for the shape the comparison
      * relies on. A malformed manifest throws instead of being compared as though it were empty.
      *
-     * @return array<string, array{main: string, version: string, sha256: string}>
+     * @return array<string, Pinned>
      *
      * @throws \JsonException when the text is not JSON
-     * @throws \UnexpectedValueException when the JSON does not carry a `plugins` map of `main`, `version` and `sha256` strings
+     * @throws \UnexpectedValueException when the JSON does not carry a `plugins` map of `main`, `version` and `sha256` strings, or an `alternates` that is not a list of strings
      */
     public static function parseManifest(string $json): array
     {
@@ -94,16 +109,29 @@ final class PluginStack
                 throw new \UnexpectedValueException('The plugin manifest entry for '.$slug.' needs string `main`, `version` and `sha256` values.');
             }
 
-            $stack[$slug] = ['main' => $entry['main'], 'version' => $entry['version'], 'sha256' => $entry['sha256']];
+            $pinned = ['main' => $entry['main'], 'version' => $entry['version'], 'sha256' => $entry['sha256']];
+
+            if (array_key_exists('alternates', $entry)) {
+                $alternates = $entry['alternates'];
+
+                if (! is_array($alternates) || ! array_is_list($alternates) || array_filter($alternates, is_string(...)) !== $alternates) {
+                    throw new \UnexpectedValueException('The plugin manifest entry for '.$slug.' needs `alternates` to be a list of strings.');
+                }
+
+                $pinned['alternates'] = $alternates;
+            }
+
+            $stack[$slug] = $pinned;
         }
 
         return $stack;
     }
 
     /**
-     * The manifest for the stack found in a plugins directory, as the committed file records it.
+     * The manifest for the stack found in a plugins directory, as the committed file records it. `alternates`
+     * (another distribution of the same version) are kept by hand and never written here.
      *
-     * @return array<string, array{main: string, version: string, sha256: string}>
+     * @return array<string, Pinned>
      */
     public static function describe(string $pluginsDirectory): array
     {
@@ -124,7 +152,7 @@ final class PluginStack
     /**
      * What differs between the manifest and the plugins directory, one sentence per difference.
      *
-     * @param  array<string, array{main: string, version: string, sha256: string}>  $manifest
+     * @param  array<string, Pinned>  $manifest
      * @return list<string>
      */
     public static function problems(string $pluginsDirectory, array $manifest): array
@@ -157,8 +185,10 @@ final class PluginStack
 
             $hash = self::fingerprint($pluginsDirectory.'/'.$slug);
 
-            if ($hash !== $pinned['sha256']) {
-                $problems[] = "{$slug}: version {$version} matches but its files do not (sha256 {$hash}, the manifest pins {$pinned['sha256']}).";
+            $accepted = [$pinned['sha256'], ...($pinned['alternates'] ?? [])];
+
+            if (! in_array($hash, $accepted, true)) {
+                $problems[] = "{$slug}: version {$version} matches but its files do not (sha256 {$hash}, the manifest pins ".implode(' or ', $accepted).').';
             }
         }
 
