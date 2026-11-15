@@ -156,22 +156,28 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           rm -rf "$work"
 
-      # The beta is not publicly distributed, so it comes from a private repository with a read-only token (#76).
-      # The tarball holds only the files that repository's `.gitattributes` leaves out of an archive, which is the
-      # plugin itself, so the stack check below fingerprints exactly what ships.
+      # The beta is not publicly distributed, so it comes from a private repository with a read-only deploy key
+      # (#76). The clone is archived, not copied, so the repository's `.gitattributes` leaves out everything but
+      # the plugin and the stack check below fingerprints exactly what ships. The SSH host key is the one GitHub
+      # publishes (`GET /meta`, `ssh_keys`), so the first connection trusts nothing it was not given.
       - name: Download ACF Custom Database Tables
         if: steps.trust.outputs.trusted == 'true'
         env:
-          ACFCDT_READ_TOKEN: ${{ secrets.ACFCDT_READ_TOKEN }}
+          ACFCDT_DEPLOY_KEY: ${{ secrets.ACFCDT_DEPLOY_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "$ACFCDT_READ_TOKEN" ]; then echo "::error::The ACFCDT_READ_TOKEN secret is empty"; exit 1; fi
+          if [ -z "$ACFCDT_DEPLOY_KEY" ]; then echo "::error::The ACFCDT_DEPLOY_KEY secret is empty"; exit 1; fi
+          umask 077
+          key="$RUNNER_TEMP/acfcdt_deploy_key"
+          known="$RUNNER_TEMP/acfcdt_known_hosts"
+          # A key pasted from Windows can end its lines with CRLF, which OpenSSH refuses on Linux.
+          printf '%s\n' "$ACFCDT_DEPLOY_KEY" | tr -d '\r' > "$key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$known"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known -o StrictHostKeyChecking=yes" \
+            git clone --quiet --depth 1 --branch "$ACFCDT_REF" "git@github.com:${ACFCDT_STORE}.git" "$RUNNER_TEMP/acfcdt"
           mkdir -p "$RUNNER_TEMP/plugins/acf-custom-database-tables"
-          curl -fsSL \
-            -H "Authorization: Bearer $ACFCDT_READ_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${ACFCDT_STORE}/tarball/${ACFCDT_REF}" \
-            | tar -xz --strip-components=1 -C "$RUNNER_TEMP/plugins/acf-custom-database-tables"
+          git -C "$RUNNER_TEMP/acfcdt" archive HEAD | tar -x -C "$RUNNER_TEMP/plugins/acf-custom-database-tables"
+          rm -rf "$key" "$known" "$RUNNER_TEMP/acfcdt"
 
       # The bootstrap compares each plugin's version and the fingerprint of its files with
       # tests/Integration/plugin-stack.json before it boots anything, and exits non-zero naming the plugin.
