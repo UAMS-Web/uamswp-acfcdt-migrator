@@ -10,6 +10,10 @@ namespace UAMSWP_ACFCDT_Migrator;
  *
  * Long jobs run as a chain of short AJAX requests (one batch of posts each). Every batch is safe to
  * retry, progress is saved after each one, and an interrupted job can be resumed from the page.
+ *
+ * @phpstan-import-type SnapInfoRow from Store
+ * @phpstan-import-type RunHeaderRow from Store
+ * @phpstan-import-type RollbackHeaderRow from Store
  */
 class Admin
 {
@@ -182,7 +186,7 @@ class Admin
 						<?php echo esc_html($t['post_type']); ?> posts with no row: <?php echo (int) $t['no_row']; ?>
 					</p>
 					<?php $cs = $inv['cache'][$t['name']] ?? null; ?>
-					<?php if ($cs) { ?>
+					<?php if (is_array($cs)) { ?>
 						<p>
 							Table map cache: post type <code><?php echo esc_html($cs['cache_post_type'] ?: '(none)'); ?></code> —
 							<?php echo $cs['intercepting'] ? '<span class="acfm-ok">plugin is reading this table</span>' : '<span class="acfm-bad">plugin is NOT reading this table (site shows postmeta)</span>'; ?>
@@ -276,8 +280,8 @@ class Admin
     /**
      * Snapshot list or backfill-run list with actions.
      *
-     * @param  array<string, array<string, mixed>>  $items  Header data keyed by snapshot label or run stamp.
-     * @param  array<string, array<string, mixed>>  $rollbacks  Rollback headers keyed by run stamp.
+     * @param  array<string, SnapInfoRow|RunHeaderRow>  $items  Header data keyed by snapshot label or run stamp.
+     * @param  array<string, RollbackHeaderRow>  $rollbacks  Rollback headers keyed by run stamp.
      */
     private static function header_table(string $type, array $items, Engine $engine, array $rollbacks = []): void
     {
@@ -293,17 +297,17 @@ class Admin
                 $posts = Store::count('snapshot', $ref);
                 // `esc_html()` converts an integer itself.
                 // @pest-mutate-ignore: RemoveStringCast
-                $progress = $status === 'complete' ? (string) $posts : $engine->posts_upto($i['cursor'] ?? 0).' / '.(isset($i['total']) ? (int) $i['total'] : '?');
+                $progress = $status === 'complete' ? (string) $posts : $engine->posts_upto($i['cursor'] ?? 0).' / '.(isset($i['total']) ? Cast::int($i['total']) : '?');
                 // The cursor and total sit in `%d` slots, which convert to an integer themselves.
                 // @pest-mutate-ignore: RemoveIntegerCast
                 printf(
                     '<tr><td><code>%1$s</code></td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td>%5$s</td><td>%6$s <a class="button button-small" href="%7$s">Download</a> <button class="button button-small button-link-delete" data-acfm-delete="snapshot" data-ref="%1$s">Delete</button></td></tr>',
                     esc_html($ref),
-                    esc_html($i['mode'] ?? ''),
-                    esc_html($status),
+                    esc_html(Cast::str($i['mode'] ?? '')),
+                    esc_html(Cast::str($status)),
                     esc_html($progress),
-                    esc_html($i['started'] ?? ''),
-                    $status === 'complete' ? '' : sprintf('<button class="button button-small" data-acfm-resume="snapshot" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button>', esc_attr($ref), (int) ($i['cursor'] ?? 0), (int) ($i['total'] ?? 0), $engine->posts_upto($i['cursor'] ?? 0)),
+                    esc_html(Cast::str($i['started'] ?? '')),
+                    $status === 'complete' ? '' : sprintf('<button class="button button-small" data-acfm-resume="snapshot" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button>', esc_attr($ref), Cast::int($i['cursor'] ?? 0), Cast::int($i['total'] ?? 0), $engine->posts_upto($i['cursor'] ?? 0)),
                     esc_url(self::dl_url(['type' => 'snapshot', 'ref' => $ref]))
                 );
             }
@@ -315,25 +319,25 @@ class Admin
         echo '<table class="widefat striped acfm-compact"><thead><tr><th>Run</th><th>Type</th><th>Status</th><th>Posts / fields changed</th><th>fill / overwrite / clear</th><th>Mismatches</th><th>Rollback</th><th></th></tr></thead><tbody>';
         foreach ($items as $ref => $r) {
             $status = $r['status'] ?? '?';
-            $sum = isset($r['stats']) ? $r : Store::change_summary($ref);
+            $sum = isset($r['stats']) ? ['stats' => $r['stats'], 'by_field' => $r['by_field'] ?? []] : Store::change_summary($ref);
             $st = $sum['stats'];
             $rb = $rollbacks[$ref] ?? null;
-            $rb_txt = $rb ? esc_html($rb['status']) : '—';
+            $rb_txt = $rb ? esc_html($rb['status'] ?? '') : '—';
             $actions = sprintf('<a class="button button-small" href="%s">Changes</a> ', esc_url(self::dl_url(['type' => 'changes', 'ref' => $ref])));
             if ($status !== 'complete') {
                 // The cursor, total and done count sit in `%d` slots, which convert to an integer themselves.
                 // @pest-mutate-ignore: RemoveIntegerCast
-                $actions .= sprintf('<button class="button button-small" data-acfm-resume="backfill" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button> ', esc_attr($ref), (int) ($r['cursor'] ?? 0), (int) $r['total'], $engine->posts_upto($r['cursor'] ?? 0));
+                $actions .= sprintf('<button class="button button-small" data-acfm-resume="backfill" data-ref="%s" data-cursor="%d" data-total="%d" data-done="%d">Resume</button> ', esc_attr($ref), Cast::int($r['cursor'] ?? 0), Cast::int($r['total'] ?? 0), $engine->posts_upto($r['cursor'] ?? 0));
             }
             if (empty($r['dry'])) {
                 $actions .= sprintf('<a class="button button-small" href="%s">Backups</a> ', esc_url(self::dl_url(['type' => 'backups', 'ref' => $ref])));
-                if (! $rb || $rb['status'] !== 'complete') {
+                if (! $rb || ($rb['status'] ?? null) !== 'complete') {
                     // The cursor sits in a `%d` slot, which converts to an integer itself.
                     // @pest-mutate-ignore: RemoveIntegerCast
                     $actions .= sprintf(
                         '<button class="button button-small" data-acfm-rollback="%1$s"%2$s>%3$s</button> ',
                         esc_attr($ref),
-                        $rb ? sprintf(' data-cursor="%d"', (int) ($rb['cursor'] ?? 0)) : '',
+                        $rb ? sprintf(' data-cursor="%d"', Cast::int($rb['cursor'] ?? 0)) : '',
                         $rb ? 'Resume rollback' : 'Roll back'
                     );
                 }
@@ -383,19 +387,19 @@ class Admin
         $p = wp_unslash($_POST);
         // An empty or an unmatched name both reach the unknown-operation error.
         // @pest-mutate-ignore: EmptyStringToNotEmpty
-        $op = isset($p['op']) ? sanitize_key($p['op']) : '';
+        $op = isset($p['op']) ? sanitize_key(Cast::str($p['op'])) : '';
         try {
             if (! Engine::acf_ready()) {
                 throw new \RuntimeException('ACF is not active.');
             }
             $engine = new Engine;
-            $ref = isset($p['ref']) ? Engine::clean_ref($p['ref']) : '';
-            $cursor = isset($p['cursor']) ? (int) $p['cursor'] : 0;
-            $limit = isset($p['limit']) ? max(1, min(200, (int) $p['limit'])) : 10;
+            $ref = isset($p['ref']) ? Engine::clean_ref(Cast::str($p['ref'])) : '';
+            $cursor = isset($p['cursor']) ? Cast::int($p['cursor']) : 0;
+            $limit = isset($p['limit']) ? max(1, min(200, Cast::int($p['limit']))) : 10;
 
             switch ($op) {
                 case 'snapshot_start':
-                    $ref = $engine->snapshot_start($p['label'], $p['mode'], ! empty($p['overwrite']));
+                    $ref = $engine->snapshot_start(Cast::str($p['label'] ?? ''), Cast::str($p['mode'] ?? ''), ! empty($p['overwrite']));
                     wp_send_json_success(['ref' => $ref, 'total' => $engine->total_posts()]);
                 case 'snapshot_batch':
                     wp_send_json_success($engine->snapshot_batch($ref, $cursor, $limit));
@@ -410,8 +414,8 @@ class Admin
                 case 'rollback_batch':
                     wp_send_json_success($engine->rollback_batch($ref, $cursor, $limit));
                 case 'compare':
-                    $ignore = array_filter(array_map(trim(...), explode(',', $p['ignore'] ?? '')));
-                    $res = $engine->compare($p['a'], $p['b'], $ignore);
+                    $ignore = array_filter(array_map(trim(...), explode(',', Cast::str($p['ignore'] ?? ''))));
+                    $res = $engine->compare(Cast::str($p['a'] ?? ''), Cast::str($p['b'] ?? ''), $ignore);
                     $total = count($res['diffs']);
                     $res['diffs'] = array_slice($res['diffs'], 0, 200);
                     foreach ($res['diffs'] as &$d) {
@@ -419,14 +423,14 @@ class Admin
                         $d['b'] = self::preview($d['b']);
                     }
                     $res['total_diffs'] = $total;
-                    $res['download'] = self::dl_url(['type' => 'compare', 'a' => $p['a'], 'b' => $p['b'], 'ignore' => $p['ignore'] ?? '']);
+                    $res['download'] = self::dl_url(['type' => 'compare', 'a' => Cast::str($p['a'] ?? ''), 'b' => Cast::str($p['b'] ?? ''), 'ignore' => Cast::str($p['ignore'] ?? '')]);
                     wp_send_json_success($res);
                 case 'delete':
-                    $kinds = $p['kind'] === 'snapshot' ? ['snapinfo', 'snapshot'] : ['run', 'change', 'backup', 'rollback'];
-                    if ($p['kind'] === 'run') {
-                        $run = Store::get('run', $ref);
-                        $rb = Store::get('rollback', $ref);
-                        if ($run && empty($run['dry']) && (! $rb || $rb['status'] !== 'complete') && empty($p['confirm_backups'])) {
+                    $kinds = ($p['kind'] ?? null) === 'snapshot' ? ['snapinfo', 'snapshot'] : ['run', 'change', 'backup', 'rollback'];
+                    if (($p['kind'] ?? null) === 'run') {
+                        $run = Cast::arr(Store::get('run', $ref));
+                        $rb = Cast::arr(Store::get('rollback', $ref));
+                        if ($run !== [] && empty($run['dry']) && ($rb === [] || ($rb['status'] ?? null) !== 'complete') && empty($p['confirm_backups'])) {
                             throw new \RuntimeException('This real run still holds the only per-field backups of the old postmeta. Download them first, then confirm deletion.');
                         }
                     }
@@ -462,7 +466,7 @@ class Admin
         $g = wp_unslash($_GET);
         // An empty or an unmatched type both reach the unknown-download error.
         // @pest-mutate-ignore: EmptyStringToNotEmpty
-        $type = isset($g['type']) ? sanitize_key($g['type']) : '';
+        $type = isset($g['type']) ? sanitize_key(Cast::str($g['type'])) : '';
         $blog = get_current_blog_id();
         @set_time_limit(300);
 
@@ -474,7 +478,7 @@ class Admin
                     $defs = $engine->site->active_defs();
                     // An empty or an unmatched name are both absent from the active tables.
                     // @pest-mutate-ignore: EmptyStringToNotEmpty
-                    $name = $g['table'] ?? '';
+                    $name = Cast::str($g['table'] ?? '');
                     if (! isset($defs[$name])) {
                         throw new \RuntimeException('Unknown table.');
                     }
@@ -512,7 +516,7 @@ class Admin
                 case 'snapshot':
                 case 'changes':
                 case 'backups':
-                    $ref = Engine::clean_ref($g['ref']);
+                    $ref = Engine::clean_ref(Cast::str($g['ref'] ?? ''));
                     $kind = $type === 'snapshot' ? 'snapshot' : ($type === 'changes' ? 'change' : 'backup');
                     self::headers("site-$blog-$type-$ref.jsonl", 'application/x-ndjson');
                     $after = 0;
@@ -526,9 +530,11 @@ class Admin
                     self::finish();
 
                 case 'compare':
-                    $ignore = array_filter(array_map(trim(...), explode(',', $g['ignore'] ?? '')));
-                    $res = $engine->compare($g['a'], $g['b'], $ignore);
-                    self::headers("site-$blog-compare-{$g['a']}__vs__{$g['b']}.jsonl", 'application/x-ndjson');
+                    $ignore = array_filter(array_map(trim(...), explode(',', Cast::str($g['ignore'] ?? ''))));
+                    $ga = Cast::str($g['a'] ?? '');
+                    $gb = Cast::str($g['b'] ?? '');
+                    $res = $engine->compare($ga, $gb, $ignore);
+                    self::headers("site-$blog-compare-{$ga}__vs__{$gb}.jsonl", 'application/x-ndjson');
                     echo Normalizer::json(['summary' => $res['summary']]), "\n";
                     foreach ($res['diffs'] as $d) {
                         echo Normalizer::json($d), "\n";

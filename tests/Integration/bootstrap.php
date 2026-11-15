@@ -61,8 +61,8 @@ if (! is_readable($wordpress.'wp-settings.php')) {
  */
 $plugins = rtrim((string) (getenv('WP_TESTS_PLUGINS_DIR') ?: $wordpress.'wp-content/plugins'), '/');
 
-$manifest = json_decode((string) file_get_contents(__DIR__.'/plugin-stack.json'), true, 512, JSON_THROW_ON_ERROR);
-$problems = PluginStack::problems($plugins, $manifest['plugins']);
+$manifest = PluginStack::parseManifest((string) file_get_contents(__DIR__.'/plugin-stack.json'));
+$problems = PluginStack::problems($plugins, $manifest);
 
 if ($problems !== []) {
     fwrite(

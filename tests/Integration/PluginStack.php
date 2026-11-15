@@ -48,6 +48,10 @@ final class PluginStack
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
 
         foreach ($files as $file) {
+            if (! $file instanceof \SplFileInfo) {
+                continue;
+            }
+
             if (! $file->isFile() || $file->getFilename() === '.DS_Store') {
                 continue;
             }
@@ -58,6 +62,42 @@ final class PluginStack
         sort($lines, SORT_STRING);
 
         return hash('sha256', implode("\n", $lines));
+    }
+
+    /**
+     * The pinned stack read out of the manifest file's JSON, with every entry checked for the shape the comparison
+     * relies on. A malformed manifest throws instead of being compared as though it were empty.
+     *
+     * @return array<string, array{main: string, version: string, sha256: string}>
+     *
+     * @throws \JsonException when the text is not JSON
+     * @throws \UnexpectedValueException when the JSON does not carry a `plugins` map of `main`, `version` and `sha256` strings
+     */
+    public static function parseManifest(string $json): array
+    {
+        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+
+        if (! is_array($decoded) || ! is_array($decoded['plugins'] ?? null)) {
+            throw new \UnexpectedValueException('The plugin manifest has no `plugins` map.');
+        }
+
+        $stack = [];
+
+        foreach ($decoded['plugins'] as $slug => $entry) {
+            if (
+                ! is_string($slug)
+                || ! is_array($entry)
+                || ! is_string($entry['main'] ?? null)
+                || ! is_string($entry['version'] ?? null)
+                || ! is_string($entry['sha256'] ?? null)
+            ) {
+                throw new \UnexpectedValueException('The plugin manifest entry for '.$slug.' needs string `main`, `version` and `sha256` values.');
+            }
+
+            $stack[$slug] = ['main' => $entry['main'], 'version' => $entry['version'], 'sha256' => $entry['sha256']];
+        }
+
+        return $stack;
     }
 
     /**

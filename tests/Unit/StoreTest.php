@@ -36,7 +36,7 @@ beforeEach(function (): void {
 
     when('get_current_blog_id')->justReturn(5);
     when('current_time')->alias(function (string $type, bool $gmt = false): string {
-        $GLOBALS['store_time_args'][] = [$type, $gmt];
+        store_push('store_time_args', [$type, $gmt]);
 
         return '2026-01-02 03:04:05';
     });
@@ -46,6 +46,26 @@ beforeEach(function (): void {
 afterEach(function (): void {
     unset($GLOBALS['store_time_args'], $GLOBALS['store_prepared'], $GLOBALS['store_executed'], $GLOBALS['store_returns'], $GLOBALS['wpdb']);
 });
+
+/**
+ * A list a helper keeps in `$GLOBALS`, or an empty one when the key is not set.
+ *
+ * @return array<mixed>
+ */
+function store_global(string $key): array
+{
+    $value = $GLOBALS[$key] ?? [];
+
+    return is_array($value) ? $value : [];
+}
+
+/** Appends an entry to a list a helper keeps in `$GLOBALS`. */
+function store_push(string $key, mixed $entry): void
+{
+    $list = store_global($key);
+    $list[] = $entry;
+    $GLOBALS[$key] = $list;
+}
 
 /**
  * A `$wpdb` that records each prepared query and each executed statement, and answers from what the test queued.
@@ -63,24 +83,33 @@ function store_wpdb(array $returns = []): MockInterface
     $wpdb->shouldReceive('esc_like')->andReturnUsing(fn (string $t): string => addcslashes($t, '_%\\'));
     $wpdb->shouldReceive('get_charset_collate')->andReturn('DEFAULT CHARACTER SET utf8mb4');
     $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {
-        $GLOBALS['store_prepared'][] = [$query, $args];
+        store_push('store_prepared', [$query, $args]);
 
         return 'P:'.$query;
     });
 
     foreach (['get_var', 'get_results', 'get_col', 'query'] as $method) {
         $wpdb->shouldReceive($method)->andReturnUsing(function (string $sql) use ($method): mixed {
-            $GLOBALS['store_executed'][] = [$method, $sql];
-            if (count($GLOBALS['store_executed']) > 20) {
+            store_push('store_executed', [$method, $sql]);
+            if (count(store_global('store_executed')) > 20) {
                 throw new LogicException('Runaway loop: more than 20 statements executed.');
             }
 
-            $queue = &$GLOBALS['store_returns'][$method];
-            if (! isset($queue) || $queue === []) {
+            $returns = store_global('store_returns');
+            $queue = $returns[$method] ?? [];
+            if (! is_array($queue) || $queue === []) {
                 return null;
             }
 
-            return count($queue) > 1 ? array_shift($queue) : $queue[0];
+            if (count($queue) > 1) {
+                $next = array_shift($queue);
+                $returns[$method] = $queue;
+                $GLOBALS['store_returns'] = $returns;
+
+                return $next;
+            }
+
+            return $queue[0];
         });
     }
 
@@ -90,13 +119,19 @@ function store_wpdb(array $returns = []): MockInterface
 }
 
 /**
- * The first prepared query and its arguments.
+ * The prepared query at an index (the first by default) and its arguments.
  *
- * @return array<int, mixed>
+ * @return array{0: string, 1: list<mixed>}
  */
 function store_prepared(int $index = 0): array
 {
-    return $GLOBALS['store_prepared'][$index];
+    $entry = store_global('store_prepared')[$index] ?? null;
+
+    if (! is_array($entry) || ! is_string($entry[0] ?? null) || ! is_array($entry[1] ?? null)) {
+        throw new LogicException("No query was prepared at index {$index}.");
+    }
+
+    return [$entry[0], array_values($entry[1])];
 }
 
 /**
@@ -383,7 +418,8 @@ it('pages descending rows before a cursor', function (): void {
 it('starts a descending page from the largest id when there is no cursor', function (mixed $cursor): void {
     store_wpdb(['get_results' => [[]]]);
 
-    Store::rows('change', 's', $cursor, 10, true);
+    // `rows()` documents `int`; the dataset's other types are the unset cursors it must treat as zero.
+    (new ReflectionMethod(Store::class, 'rows'))->invoke(null, 'change', 's', $cursor, 10, true);
 
     expect(store_prepared()[1][3])->toBe(PHP_INT_MAX);
 })->with([0, '0', null, false]);
@@ -436,7 +472,7 @@ it('keeps paging while a full page of 1000 comes back, from the last id seen', f
 
     $out = Store::by_post('snapshot', 'label');
 
-    expect(count($GLOBALS['store_prepared']))->toBe(2)
+    expect(count(store_global('store_prepared')))->toBe(2)
         ->and(store_prepared(0)[1][3])->toBe(0)
         ->and(store_prepared(1)[1][3])->toBe(1000)
         ->and(store_prepared(1)[1][4])->toBe(1000)
@@ -454,7 +490,7 @@ it('stops after a page of 999', function (): void {
     store_wpdb(['get_results' => [$short, [store_row(['id' => '1000', 'post_id' => '1000', 'data' => '1'])]]]);
 
     expect(Store::by_post('snapshot', 'label'))->toHaveCount(999)
-        ->and(count($GLOBALS['store_prepared']))->toBe(1);
+        ->and(count(store_global('store_prepared')))->toBe(1);
 });
 
 it('stops after a page of 1001, which cannot happen but is not a full page', function (): void {
@@ -466,7 +502,7 @@ it('stops after a page of 1001, which cannot happen but is not a full page', fun
     store_wpdb(['get_results' => [$over, [store_row(['id' => '2000', 'post_id' => '2000', 'data' => '1'])]]]);
 
     expect(Store::by_post('snapshot', 'label'))->toHaveCount(1001)
-        ->and(count($GLOBALS['store_prepared']))->toBe(1);
+        ->and(count(store_global('store_prepared')))->toBe(1);
 });
 
 // count()
@@ -637,4 +673,46 @@ it('keeps the per-field row from the first change and does not reset it for late
     ]]]);
 
     expect(Store::change_summary('stamp')['by_field'])->toBe([['field' => 'doctor.a', 'fill' => 3, 'overwrite' => 0, 'clear' => 0]]);
+});
+
+it('reads a change row with every key into the exact stats, fields and posts', function (): void {
+    store_wpdb(['get_col' => [[store_change('overwrite', 'doctor', 'bio', 7)]]]);
+
+    expect(Store::change_summary('stamp'))->toBe([
+        'stats' => ['fields' => 1, 'fill' => 0, 'overwrite' => 1, 'clear' => 0, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0, 'posts' => 1],
+        'by_field' => [['field' => 'doctor.bio', 'fill' => 0, 'overwrite' => 1, 'clear' => 0]],
+    ]);
+});
+
+it('counts a change with no category as a field that is in no category', function (): void {
+    store_wpdb(['get_col' => [[
+        json_encode(['post_type' => 'doctor', 'field' => 'bio', 'post_id' => 4], JSON_THROW_ON_ERROR),
+    ]]]);
+
+    expect(Store::change_summary('stamp'))->toBe([
+        'stats' => ['fields' => 1, 'fill' => 0, 'overwrite' => 0, 'clear' => 0, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0, 'posts' => 1],
+        'by_field' => [['field' => 'doctor.bio', 'fill' => 0, 'overwrite' => 0, 'clear' => 0]],
+    ]);
+});
+
+it('files a change with no post id, post type or field under an empty key and counts one post', function (): void {
+    store_wpdb(['get_col' => [[
+        json_encode(['category' => 'fill'], JSON_THROW_ON_ERROR),
+        json_encode(['category' => 'clear'], JSON_THROW_ON_ERROR),
+    ]]]);
+
+    expect(Store::change_summary('stamp'))->toBe([
+        'stats' => ['fields' => 2, 'fill' => 1, 'overwrite' => 0, 'clear' => 1, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0, 'posts' => 1],
+        'by_field' => [['field' => '.', 'fill' => 1, 'overwrite' => 0, 'clear' => 1]],
+    ]);
+});
+
+it('keeps a missing post id apart from post one and from post minus one', function (): void {
+    store_wpdb(['get_col' => [[
+        json_encode(['category' => 'fill', 'post_type' => 'a', 'field' => 'f'], JSON_THROW_ON_ERROR),
+        store_change('fill', 'a', 'f', 1),
+        store_change('fill', 'a', 'f', -1),
+    ]]]);
+
+    expect(Store::change_summary('stamp')['stats']['posts'])->toBe(3);
 });

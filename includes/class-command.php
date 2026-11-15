@@ -55,7 +55,7 @@ class Command
 
         $engine = $this->engine($assoc);
         $inv = $engine->inventory();
-        $format = get_flag_value($assoc, 'format', 'table');
+        $format = Cast::str($this->flag($assoc, 'format', 'table'));
 
         $this->site_header($engine->site);
         WP_CLI::log('Table JSON dir:          '.$inv['json_dir']);
@@ -63,7 +63,7 @@ class Command
         WP_CLI::log('Plugin intercepts found: '.$inv['intercepts'].' on ['.implode(', ', $inv['hooks']).']');
         WP_CLI::log('Values stored in core meta: '.($inv['core_meta'] ? 'yes' : 'NO — custom table is the only copy'));
         foreach ($inv['cache'] as $name => $cs) {
-            if ($name === '_missing') {
+            if ($name === '_missing' || ! is_array($cs)) {
                 continue;
             }
 
@@ -137,8 +137,8 @@ class Command
         }
 
         global $wpdb;
-        $site = new Site(get_flag_value($assoc, 'json-dir'));
-        $dir = Site::out_dir(get_flag_value($assoc, 'dir'), 'archive/'.sanitize_file_name($assoc['stamp']));
+        $site = new Site($this->opt($assoc, 'json-dir'));
+        $dir = Site::out_dir($this->opt($assoc, 'dir'), 'archive/'.sanitize_file_name(Cast::str($assoc['stamp'])));
         $this->site_header($site);
 
         $manifest = [];
@@ -277,7 +277,7 @@ class Command
         $engine = $this->engine($assoc);
         $this->site_header($engine->site);
         try {
-            $label = $engine->snapshot_start($args[0], get_flag_value($assoc, 'mode', 'effective'), (bool) get_flag_value($assoc, 'force'));
+            $label = $engine->snapshot_start($args[0], Cast::str($this->flag($assoc, 'mode', 'effective')), (bool) $this->flag($assoc, 'force'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
 
@@ -339,7 +339,7 @@ class Command
 
         $engine = $this->engine($assoc);
         $this->site_header($engine->site);
-        $ignore = array_filter(array_map(trim(...), explode(',', (string) get_flag_value($assoc, 'ignore-fields', ''))));
+        $ignore = array_filter(array_map(trim(...), explode(',', Cast::str($this->flag($assoc, 'ignore-fields', '')))));
         try {
             $res = $engine->compare($args[0], $args[1], $ignore);
         } catch (\Exception $exception) {
@@ -348,7 +348,7 @@ class Command
             return;
         }
 
-        foreach (array_slice($res['diffs'], 0, (int) get_flag_value($assoc, 'limit', 25)) as $d) {
+        foreach (array_slice($res['diffs'], 0, Cast::int($this->flag($assoc, 'limit', 25))) as $d) {
             WP_CLI::log(sprintf('post %d "%s" field %s', $d['post_id'], $d['title'], $d['field']));
             WP_CLI::log("    {$args[0]}: ".$this->preview($d['a']));
             WP_CLI::log("    {$args[1]}: ".$this->preview($d['b']));
@@ -400,7 +400,7 @@ class Command
      */
     public function backfill($args, $assoc): void
     {
-        $assoc['stamp'] ??= gmdate('Ymd-His').(get_flag_value($assoc, 'dry-run') ? '-dry' : '');
+        $assoc['stamp'] ??= gmdate('Ymd-His').($this->flag($assoc, 'dry-run') ? '-dry' : '');
 
         if ($this->maybe_network('backfill', $args, $assoc)) {
             return;
@@ -408,9 +408,9 @@ class Command
 
         $engine = $this->engine($assoc);
         $this->site_header($engine->site);
-        $dry = (bool) get_flag_value($assoc, 'dry-run');
+        $dry = (bool) $this->flag($assoc, 'dry-run');
         try {
-            $stamp = $engine->backfill_start($dry, (bool) get_flag_value($assoc, 'no-clear'), $assoc['stamp'], (bool) get_flag_value($assoc, 'allow-stale-cache'));
+            $stamp = $engine->backfill_start($dry, (bool) $this->flag($assoc, 'no-clear'), Cast::str($assoc['stamp']), (bool) $this->flag($assoc, 'allow-stale-cache'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
 
@@ -487,7 +487,7 @@ class Command
         }
 
         try {
-            $stamp = $engine->rollback_start($args[0], (bool) get_flag_value($assoc, 'force'));
+            $stamp = $engine->rollback_start($args[0], (bool) $this->flag($assoc, 'force'));
         } catch (\Exception $exception) {
             WP_CLI::error($exception->getMessage());
 
@@ -534,7 +534,7 @@ class Command
         $rbs = Store::headers('rollback');
         foreach (Store::headers('run') as $ref => $r) {
             $st = $r['stats'] ?? Store::change_summary($ref)['stats'];
-            $rows[] = ['type' => empty($r['dry']) ? 'backfill' : 'dry run', 'name' => $ref, 'detail' => "{$st['fields']} fields, {$st['write_mismatch']} mismatches".(isset($rbs[$ref]) ? ', rollback '.$rbs[$ref]['status'] : ''), 'status' => $r['status'] ?? '', 'when' => $r['created']];
+            $rows[] = ['type' => empty($r['dry']) ? 'backfill' : 'dry run', 'name' => $ref, 'detail' => "{$st['fields']} fields, {$st['write_mismatch']} mismatches".(isset($rbs[$ref]) ? ', rollback '.($rbs[$ref]['status'] ?? '') : ''), 'status' => $r['status'] ?? '', 'when' => $r['created']];
         }
 
         $rows !== [] ? format_items('table', $rows, ['type', 'name', 'detail', 'status', 'when']) : WP_CLI::log('   nothing stored yet');
@@ -551,7 +551,7 @@ class Command
      */
     private function maybe_network(string $sub, $args, $assoc): bool
     {
-        if (! get_flag_value($assoc, 'network')) {
+        if (! $this->flag($assoc, 'network')) {
             return false;
         }
 
@@ -562,7 +562,7 @@ class Command
         unset($assoc['network']);
         global $wpdb;
 
-        $table_names = array_keys((new Site(get_flag_value($assoc, 'json-dir')))->table_defs());
+        $table_names = array_keys((new Site($this->opt($assoc, 'json-dir')))->table_defs());
         if ($table_names === []) {
             WP_CLI::error('No table definition JSON files found (is ACFCDT_JSON_DIR defined? try --json-dir).');
         }
@@ -595,7 +595,7 @@ class Command
         $config = WP_CLI::get_runner()->config;
         foreach (['skip-plugins', 'skip-themes'] as $global) {
             if (! empty($config[$global])) {
-                $assoc[$global] = is_array($config[$global]) ? implode(',', $config[$global]) : $config[$global];
+                $assoc[$global] = is_array($config[$global]) ? implode(',', Cast::strings($config[$global])) : $config[$global];
             }
         }
 
@@ -642,7 +642,7 @@ class Command
             'WP_CLI_CONFIG_PATH=%s %s %s %s %s %s',
             escapeshellarg($config_path),
             escapeshellarg(get_php_binary()),
-            escapeshellarg($GLOBALS['argv'][0]),
+            escapeshellarg(Cast::str(Cast::arr($GLOBALS['argv'] ?? [])[0] ?? '')),
             $command,
             implode(' ', array_map(escapeshellarg(...), $args)),
             assoc_args_to_str($assoc)
@@ -656,6 +656,31 @@ class Command
         }
 
         return proc_close($proc);
+    }
+
+    /**
+     * Read a flag the way `get_flag_value()` does; WP-CLI types its argument as bool|string values only.
+     *
+     * @param  array<string, mixed>  $assoc
+     */
+    private function flag($assoc, string $name, mixed $default = null): mixed
+    {
+        /** @var array<string, bool|string> $flags */
+        $flags = $assoc;
+
+        return get_flag_value($flags, $name, $default);
+    }
+
+    /**
+     * A string-valued flag, or null when it is absent or not a string (for example a bare `--dir`).
+     *
+     * @param  array<string, mixed>  $assoc
+     */
+    private function opt($assoc, string $name): ?string
+    {
+        $value = $this->flag($assoc, $name);
+
+        return is_string($value) ? $value : null;
     }
 
     private function site_header(Site $site): void
@@ -673,7 +698,7 @@ class Command
             WP_CLI::error('ACF is not loaded.');
         }
 
-        return new Engine(new Site(get_flag_value($assoc, 'json-dir')));
+        return new Engine(new Site($this->opt($assoc, 'json-dir')));
     }
 
     /**
@@ -682,9 +707,9 @@ class Command
      */
     private function ids($assoc): ?array
     {
-        $ids = get_flag_value($assoc, 'ids');
+        $ids = $this->flag($assoc, 'ids');
 
-        return $ids ? array_filter(array_map(absint(...), explode(',', $ids))) : null;
+        return $ids ? array_filter(array_map(absint(...), explode(',', Cast::str($ids)))) : null;
     }
 
     /**

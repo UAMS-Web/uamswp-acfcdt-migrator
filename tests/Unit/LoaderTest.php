@@ -17,6 +17,7 @@
 declare(strict_types=1);
 
 use UAMSWP_ACFCDT_Migrator\Admin;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Command;
 use UAMSWP_ACFCDT_Migrator\Loader;
 
@@ -36,12 +37,12 @@ beforeEach(function (): void {
     $GLOBALS['loader_included'] = [];
     $GLOBALS['loader_admin_inits'] = 0;
     redefine(Admin::class.'::init', function (): void {
-        $GLOBALS['loader_admin_inits']++;
+        $GLOBALS['loader_admin_inits'] = loader_admin_inits() + 1;
     });
 });
 
 afterEach(function (): void {
-    foreach ($GLOBALS['loader_dirs'] ?? [] as $dir) {
+    foreach (Cast::strings($GLOBALS['loader_dirs'] ?? []) as $dir) {
         array_map(unlink(...), glob($dir.'/includes/*.php') ?: []);
         rmdir($dir.'/includes');
         rmdir($dir);
@@ -53,17 +54,33 @@ afterEach(function (): void {
     unset($GLOBALS['loader_included'], $GLOBALS['loader_admin_inits']);
 });
 
+/**
+ * What the stand-in `includes/` files have recorded, in order.
+ *
+ * @return list<string>
+ */
+function loader_included(): array
+{
+    return Cast::strings($GLOBALS['loader_included'] ?? []);
+}
+
+/** How many times the redefined `Admin::init()` has run. */
+function loader_admin_inits(): int
+{
+    return Cast::int($GLOBALS['loader_admin_inits'] ?? 0);
+}
+
 /** Makes a plugin directory whose `includes/` files each record their own name when included. */
 function loader_dir(): string
 {
     $dir = sys_get_temp_dir().'/loader-test-'.bin2hex(random_bytes(6));
     mkdir($dir.'/includes', 0777, true);
 
-    foreach (['hook-guard', 'normalizer', 'site', 'store', 'engine', 'command', 'admin'] as $name) {
+    foreach (['cast', 'hook-guard', 'normalizer', 'site', 'store', 'engine', 'command', 'admin'] as $name) {
         file_put_contents($dir.'/includes/class-'.$name.'.php', "<?php\n\$GLOBALS['loader_included'][] = '".$name."';\n");
     }
 
-    $GLOBALS['loader_dirs'][] = $dir;
+    $GLOBALS['loader_dirs'] = [...Cast::strings($GLOBALS['loader_dirs'] ?? []), $dir];
 
     return $dir;
 }
@@ -83,11 +100,11 @@ function loader_run(bool $cli, bool $hooks, bool $admin): array
 
     Loader::load(loader_dir());
 
-    return $GLOBALS['loader_included'];
+    return loader_included();
 }
 
 it('always loads the five engine classes, in dependency order, from the includes folder it is given', function (): void {
-    expect(loader_run(false, false, false))->toBe(['hook-guard', 'normalizer', 'site', 'store', 'engine']);
+    expect(loader_run(false, false, false))->toBe(['cast', 'hook-guard', 'normalizer', 'site', 'store', 'engine']);
 });
 
 it('registers the command only when WP-CLI is running', function (bool $defined, mixed $value, bool $registers): void {
@@ -96,7 +113,7 @@ it('registers the command only when WP-CLI is running', function (bool $defined,
 
     Loader::load(loader_dir());
 
-    expect(in_array('command', $GLOBALS['loader_included'], true))->toBe($registers)
+    expect(in_array('command', loader_included(), true))->toBe($registers)
         ->and(CommandTestCli::$calls)->toBe($registers ? [['add_command', 'acfcdt-migrate', Command::class]] : []);
 })->with([
     'WP-CLI running' => [true, true, true],
@@ -114,7 +131,7 @@ it('does not read the constant when it is not defined', function (): void {
 });
 
 it('loads the command class after the engine classes and before the admin classes', function (): void {
-    expect(loader_run(true, true, true))->toBe(['hook-guard', 'normalizer', 'site', 'store', 'engine', 'command', 'admin']);
+    expect(loader_run(true, true, true))->toBe(['cast', 'hook-guard', 'normalizer', 'site', 'store', 'engine', 'command', 'admin']);
 });
 
 it('leaves the admin screens alone when the hook API is missing, as under wp --require', function (bool $add_action, bool $is_admin): void {
@@ -125,8 +142,8 @@ it('leaves the admin screens alone when the hook API is missing, as under wp --r
 
     Loader::load(loader_dir());
 
-    expect(in_array('admin', $GLOBALS['loader_included'], true))->toBeFalse()
-        ->and($GLOBALS['loader_admin_inits'])->toBe(0);
+    expect(in_array('admin', loader_included(), true))->toBeFalse()
+        ->and(loader_admin_inits())->toBe(0);
 })->with([
     'neither function' => [false, false],
     'add_action only' => [true, false],
@@ -136,8 +153,8 @@ it('leaves the admin screens alone when the hook API is missing, as under wp --r
 it('loads the admin class on any request but starts it only on an admin request', function (bool $admin, int $inits): void {
     $included = loader_run(false, true, $admin);
 
-    expect($included)->toBe(['hook-guard', 'normalizer', 'site', 'store', 'engine', 'admin'])
-        ->and($GLOBALS['loader_admin_inits'])->toBe($inits);
+    expect($included)->toBe(['cast', 'hook-guard', 'normalizer', 'site', 'store', 'engine', 'admin'])
+        ->and(loader_admin_inits())->toBe($inits);
 })->with([
     'admin request' => [true, 1],
     'front end request' => [false, 0],

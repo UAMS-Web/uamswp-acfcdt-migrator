@@ -27,6 +27,7 @@ declare(strict_types=1);
 
 use Brain\Monkey\Functions;
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Site;
 
 use function Brain\Monkey\Functions\when;
@@ -50,17 +51,97 @@ beforeEach(function (): void {
     when('get_current_blog_id')->justReturn(5);
     when('home_url')->alias(fn (string $path = ''): string => 'https://example.test'.$path);
     when('untrailingslashit')->alias(fn (string $s): string => rtrim($s, '/\\'));
-    when('absint')->alias(fn (mixed $n): int => abs((int) $n));
+    when('absint')->alias(fn (mixed $n): int => abs(Cast::int($n)));
 });
 
 afterEach(function (): void {
-    foreach ($GLOBALS['site_dirs'] as $dir) {
+    foreach (Cast::strings(site_global('site_dirs')) as $dir) {
         site_remove($dir);
     }
 
     unset($GLOBALS['site_dirs'], $GLOBALS['site_prepared'], $GLOBALS['site_tables'], $GLOBALS['site_save_json'], $GLOBALS['site_acf_calls'], $GLOBALS['wpdb']);
     SiteTestFs::reset();
 });
+
+/**
+ * A list a helper keeps in `$GLOBALS`, or an empty one when the key is not set.
+ *
+ * @return array<mixed>
+ */
+function site_global(string $key): array
+{
+    $value = $GLOBALS[$key] ?? [];
+
+    return is_array($value) ? $value : [];
+}
+
+/** Appends an entry to a list a helper keeps in `$GLOBALS`. */
+function site_push(string $key, mixed $entry): void
+{
+    $list = site_global($key);
+    $list[] = $entry;
+    $GLOBALS[$key] = $list;
+}
+
+/**
+ * The queries `$wpdb->prepare()` has been given, each as the query and its arguments.
+ *
+ * @return list<array{0: string, 1: array<mixed>}>
+ */
+function site_prepared_log(): array
+{
+    $log = [];
+
+    foreach (site_global('site_prepared') as $entry) {
+        if (is_array($entry) && is_string($entry[0] ?? null) && is_array($entry[1] ?? null)) {
+            $log[] = [$entry[0], $entry[1]];
+        }
+    }
+
+    return $log;
+}
+
+/**
+ * The calls `site_acf()` has logged.
+ *
+ * @return list<array<mixed>>
+ */
+function site_acf_calls_log(): array
+{
+    $calls = [];
+
+    foreach (site_global('site_acf_log') as $call) {
+        if (is_array($call)) {
+            $calls[] = $call;
+        }
+    }
+
+    return $calls;
+}
+
+/**
+ * How many logged calls asked for a group's fields.
+ */
+function site_field_reads(): int
+{
+    return count(array_filter(site_acf_calls_log(), fn (array $c): bool => $c[0] === 'fields'));
+}
+
+/**
+ * The `not_cached` list of one table in a site's cache status.
+ *
+ * @return list<string>
+ */
+function site_not_cached(Site $site, string $table): array
+{
+    $entry = $site->cache_status()[$table] ?? null;
+
+    if (! is_array($entry)) {
+        throw new LogicException("No cache entry for {$table}.");
+    }
+
+    return $entry['not_cached'];
+}
 
 /** Removes a directory tree. */
 function site_remove(string $path): void
@@ -89,7 +170,7 @@ function site_dir(array $files = []): string
 {
     $dir = sys_get_temp_dir().'/site-test-'.bin2hex(random_bytes(6));
     mkdir($dir);
-    $GLOBALS['site_dirs'][] = $dir;
+    site_push('site_dirs', $dir);
 
     foreach ($files as $path => $contents) {
         if (! is_dir(dirname($dir.'/'.$path))) {
@@ -132,15 +213,15 @@ function site_wpdb(array $existing = []): MockInterface
     $wpdb->postmeta = 'wp_postmeta';
     $wpdb->shouldReceive('esc_like')->andReturnUsing(fn (string $t): string => addcslashes($t, '_%\\'));
     $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {
-        $GLOBALS['site_prepared'][] = [$query, $args];
+        site_push('site_prepared', [$query, $args]);
 
         return $query.'|'.json_encode($args);
     });
     $wpdb->shouldReceive('get_var')->andReturnUsing(function (string $sql): ?string {
         [, $json] = explode('|', $sql, 2);
-        $like = stripslashes((string) (json_decode($json, true)[0] ?? ''));
+        $like = stripslashes(Cast::str(Cast::arr(json_decode($json, true))[0] ?? ''));
 
-        return in_array($like, $GLOBALS['site_tables'], true) ? $like : null;
+        return in_array($like, site_global('site_tables'), true) ? $like : null;
     });
     $GLOBALS['wpdb'] = $wpdb;
 
@@ -152,9 +233,9 @@ function site_acf_setting(string $save_json): void
 {
     $GLOBALS['site_save_json'] = $save_json;
     when('acf_get_setting')->alias(function (string $name): string {
-        $GLOBALS['site_acf_calls'][] = $name;
+        site_push('site_acf_calls', $name);
 
-        return $GLOBALS['site_save_json'];
+        return Cast::str($GLOBALS['site_save_json']);
     });
 }
 
@@ -177,7 +258,7 @@ it('falls back to the uploads folder when nothing names the JSON folder', functi
         ->and((new Site)->json_dir())->toBe('/wp-content-test/uploads/acf-custom-database-tables');
 });
 
-it('ignores an empty folder override', function (mixed $override): void {
+it('ignores an empty folder override', function (?string $override): void {
     expect((new Site($override))->json_dir())->toBe('/wp-content-test/uploads/acf-custom-database-tables');
 })->with([[null], [''], ['0']]);
 
@@ -185,21 +266,21 @@ it('reads the save-JSON setting of ACF and looks in its database-tables folder',
     site_acf_setting('/themes/acf-json/');
 
     expect((new Site)->json_dir())->toBe('/themes/acf-json/database-tables')
-        ->and($GLOBALS['site_acf_calls'])->toBe(['save_json', 'save_json']);
+        ->and(site_global('site_acf_calls'))->toBe(['save_json', 'save_json']);
 });
 
 it('falls back to the uploads folder when ACF has no save-JSON setting', function (): void {
     site_acf_setting('');
 
     expect((new Site)->json_dir())->toBe('/wp-content-test/uploads/acf-custom-database-tables')
-        ->and($GLOBALS['site_acf_calls'])->toBe(['save_json']);
+        ->and(site_global('site_acf_calls'))->toBe(['save_json']);
 });
 
 it('prefers the folder it was given over ACF', function (): void {
     site_acf_setting('/themes/acf-json');
 
     expect((new Site('/given'))->json_dir())->toBe('/given')
-        ->and($GLOBALS['site_acf_calls'])->toBe([]);
+        ->and(site_global('site_acf_calls'))->toBe([]);
 });
 
 /* ====================================================================== table definitions */
@@ -326,7 +407,7 @@ it('asks the database for the exact table name, with the underscore escaped', fu
     $site = new Site;
 
     expect($site->table_exists('provider'))->toBeTrue()
-        ->and($GLOBALS['site_prepared'])->toBe([['SHOW TABLES LIKE %s', ['wp\_provider']]]);
+        ->and(site_prepared_log())->toBe([['SHOW TABLES LIKE %s', ['wp\_provider']]]);
 });
 
 it('says a table does not exist when the database does not name it', function (): void {
@@ -445,14 +526,14 @@ it('reads field names that the cache stores as an object', function (): void {
     $dir = site_dir(['t.json' => site_def('provider', 'provider', [['name' => 'a', 'map' => ['identifier' => 'a']]])]);
     site_cache($dir, '<?php return ["acf_field_names" => ["post:provider" => (object) ["a" => 1]]];');
 
-    expect((new Site($dir))->cache_status()['provider']['not_cached'])->toBe([]);
+    expect(site_not_cached(new Site($dir), 'provider'))->toBe([]);
 });
 
 it('matches a column by strict comparison, not by loose equality', function (): void {
     $dir = site_dir(['t.json' => site_def('provider', 'provider', [['name' => '0', 'map' => ['identifier' => 'zero']]])]);
     site_cache($dir, '<?php return ["acf_field_names" => ["post:provider" => ["other" => 1]]];');
 
-    expect((new Site($dir))->cache_status()['provider']['not_cached'])->toBe(['zero']);
+    expect(site_not_cached(new Site($dir), 'provider'))->toBe(['zero']);
 });
 
 /* ====================================================================== problems the plugin has reading a table */
@@ -497,7 +578,7 @@ it('finds no posts for no post types, without asking the database', function ():
     $wpdb->shouldReceive('get_results')->never();
 
     expect((new Site)->posts([]))->toBe([])
-        ->and($GLOBALS['site_prepared'])->toBe([]);
+        ->and(site_prepared_log())->toBe([]);
 });
 
 it('throws when the posts query fails', function (): void {
@@ -511,9 +592,10 @@ it('throws when the posts query fails', function (): void {
  * The query `Site::posts()` runs, and what it prepared it from.
  *
  * @param  list<string>  $types
- * @return array{0: array<int, stdClass>|null, 1: array<string>, 2: mixed}
+ * @param  array<int, int|string>|int|string|null  $ids
+ * @return array{0: array<int, stdClass>|null, 1: array<string>, 2: list<array{0: string, 1: array<mixed>}>}
  */
-function site_posts(array $types, mixed $ids = null, mixed $limit = 0): array
+function site_posts(array $types, array|int|string|null $ids = null, int|string $limit = 0): array
 {
     $wpdb = site_wpdb();
     $ran = new ArrayObject;
@@ -525,7 +607,7 @@ function site_posts(array $types, mixed $ids = null, mixed $limit = 0): array
 
     $found = (new Site)->posts($types, $ids, $limit);
 
-    return [$found, $ran->getArrayCopy(), $GLOBALS['site_prepared']];
+    return [$found, $ran->getArrayCopy(), site_prepared_log()];
 }
 
 it('selects every post of the given types except auto-drafts and revisions', function (): void {
@@ -564,14 +646,14 @@ it('matches nothing when every given ID is dropped', function (): void {
     expect($ran[0])->toEndWith(' AND ID IN (0) ORDER BY ID ASC');
 });
 
-it('does not limit the IDs when none are given', function (mixed $ids): void {
+it('does not limit the IDs when none are given', function (array|int|string|null $ids): void {
     [, $ran] = site_posts(['p'], $ids);
 
     expect($ran[0])->not->toContain('ID IN')
         ->and($ran[0])->toEndWith(' ORDER BY ID ASC');
 })->with([[null], [[]], [0], ['']]);
 
-it('limits the number of posts, as an integer', function (mixed $limit, string $tail): void {
+it('limits the number of posts, as an integer', function (int|string $limit, string $tail): void {
     [, $ran] = site_posts(['p'], null, $limit);
 
     /** @var non-empty-string $tail */
@@ -602,12 +684,12 @@ function site_acf(array $groups, array $fields): void
 {
     $GLOBALS['site_acf_log'] = [];
     when('acf_get_field_groups')->alias(function (array $args) use ($groups): mixed {
-        $GLOBALS['site_acf_log'][] = ['groups', $args];
+        site_push('site_acf_log', ['groups', $args]);
 
         return $groups[array_key_first($args)] ?? false;
     });
     when('acf_get_fields')->alias(function (array $group) use ($fields): mixed {
-        $GLOBALS['site_acf_log'][] = ['fields', $group['key']];
+        site_push('site_acf_log', ['fields', $group['key']]);
 
         return $fields[$group['key']] ?? false;
     });
@@ -626,7 +708,7 @@ it('lists the top-level fields of a post, by name, from every group that applies
 
     expect(array_keys($fields))->toBe(['alpha', 'mid', 'zeta'])
         ->and($fields['mid'])->toBe(['name' => 'mid', 'type' => 'number'])
-        ->and($GLOBALS['site_acf_log'])->toBe([
+        ->and(site_acf_calls_log())->toBe([
             ['groups', ['post_id' => 12]],
             ['groups', ['post_type' => 'provider']],
             ['fields', 'group_a'],
@@ -651,7 +733,7 @@ it('counts a group that applies twice once', function (): void {
 
     (new Site)->fields_for_post(1, 'p');
 
-    expect(array_values(array_filter($GLOBALS['site_acf_log'], fn (array $c): bool => $c[0] === 'fields')))->toBe([['fields', 'group_a']]);
+    expect(array_values(array_filter(site_acf_calls_log(), fn (array $c): bool => $c[0] === 'fields')))->toBe([['fields', 'group_a']]);
 });
 
 it('treats an ACF failure to list groups or fields as none', function (): void {
@@ -672,9 +754,9 @@ it('asks ACF once for the same groups and post type', function (): void {
 
     $site->fields_for_post(1, 'p');
 
-    $before = count(array_filter($GLOBALS['site_acf_log'], fn (array $c): bool => $c[0] === 'fields'));
+    $before = site_field_reads();
     $again = $site->fields_for_post(2, 'p');
-    $after = count(array_filter($GLOBALS['site_acf_log'], fn (array $c): bool => $c[0] === 'fields'));
+    $after = site_field_reads();
 
     expect($before)->toBe(1)
         ->and($after)->toBe(1)
@@ -688,7 +770,7 @@ it('keeps the fields of a post type apart from another type with the same groups
     $site->fields_for_post(1, 'one');
     $site->fields_for_post(1, 'two');
 
-    expect(count(array_filter($GLOBALS['site_acf_log'], fn (array $c): bool => $c[0] === 'fields')))->toBe(2);
+    expect(site_field_reads())->toBe(2);
 });
 
 it('keeps the fields of different groups apart for one post type', function (): void {
@@ -760,7 +842,7 @@ it('deletes the same rows it selects', function (bool $complex, string $where, a
     $deleted = (new Site)->delete_meta_rows_for_field(12, 'my_field', $complex);
 
     expect($deleted)->toBe(4)
-        ->and($GLOBALS['site_prepared'])->toBe([["DELETE FROM wp_postmeta WHERE post_id = %d AND $where", [array_merge([12], $params)]]]);
+        ->and(site_prepared_log())->toBe([["DELETE FROM wp_postmeta WHERE post_id = %d AND $where", [array_merge([12], $params)]]]);
 })->with([
     'simple' => [false, '(meta_key = %s OR meta_key = %s)', ['my_field', '_my_field']],
     'complex' => [true, '(meta_key = %s OR meta_key = %s OR meta_key LIKE %s OR meta_key LIKE %s)', ['my_field', '_my_field', 'my\\_field\\_%', '\\_my\\_field\\_%']],
@@ -782,11 +864,12 @@ it('hands the prepared delete to the database', function (): void {
 
 /* ====================================================================== output folder */
 
-it('returns the folder it is given as it is when there is no sub-folder', function (mixed $sub): void {
+it('returns the folder it is given as it is when there is no sub-folder', function (?string $sub): void {
     $dir = site_dir();
     Functions\expect('wp_mkdir_p')->never();
 
-    expect(Site::out_dir($dir.'/', $sub))->toBe($dir);
+    // `out_dir()` documents `string`; the dataset's `null` is the unset case, so the call goes through reflection.
+    expect((new ReflectionMethod(Site::class, 'out_dir'))->invoke(null, $dir.'/', $sub))->toBe($dir);
 })->with([[''], ['0'], [null]]);
 
 it('adds the sub-folder after trimming its slashes', function (): void {
@@ -862,7 +945,7 @@ it('uses the JSON folder constant before ACF and the uploads folder', function (
     define('ACFCDT_JSON_DIR', '/constant/json/');
 
     expect((new Site)->json_dir())->toBe('/constant/json')
-        ->and($GLOBALS['site_acf_calls'])->toBe([]);
+        ->and(site_global('site_acf_calls'))->toBe([]);
 });
 
 it('uses the output folder constant before the default', function (): void {

@@ -9,6 +9,7 @@ namespace UAMSWP_ACFCDT_Migrator;
  * which posts to process, which ACF fields apply to a post, and where output files go.
  *
  * @phpstan-type TableDef array{name: string, post_type: string, file: string, columns: list<array{name: string, identifier: string}>}
+ * @phpstan-type CacheEntry array{cache_post_type: string|null, intercepting: bool, not_cached: list<string>}
  */
 class Site
 {
@@ -52,7 +53,7 @@ class Site
         }
 
         if (function_exists('acf_get_setting') && acf_get_setting('save_json')) {
-            return untrailingslashit(acf_get_setting('save_json')).'/database-tables';
+            return untrailingslashit(Cast::str(acf_get_setting('save_json'))).'/database-tables';
         }
 
         return WP_CONTENT_DIR.'/uploads/acf-custom-database-tables';
@@ -76,22 +77,24 @@ class Site
                 continue;
             }
 
-            $rel = $def['relationship'] ?? [];
+            $rel = Cast::arr($def['relationship'] ?? null);
             if (($rel['type'] ?? null) !== 'post' || empty($rel['post_type'])) {
                 continue;
             }
 
             $columns = [];
             foreach ((array) ($def['columns'] ?? []) as $col) {
+                $col = Cast::arr($col);
                 $columns[] = [
-                    'name' => $col['name'] ?? '',
-                    'identifier' => $col['map']['identifier'] ?? '',
+                    'name' => Cast::str($col['name'] ?? ''),
+                    'identifier' => Cast::str(Cast::arr($col['map'] ?? null)['identifier'] ?? ''),
                 ];
             }
 
-            $this->defs[$def['name']] = [
-                'name' => $def['name'],
-                'post_type' => $rel['post_type'],
+            $name = Cast::str($def['name']);
+            $this->defs[$name] = [
+                'name' => $name,
+                'post_type' => Cast::str($rel['post_type']),
                 'file' => $file,
                 'columns' => $columns,
             ];
@@ -140,8 +143,8 @@ class Site
      * serving postmeta, even though the table exists and holds data. Columns missing from the cache are likewise
      * served from postmeta.
      *
-     * @return array<string, mixed> table name => [cache_post_type, intercepting, not_cached[]]; a lone `_missing` key
-     *                              holding the cache path if there is no cache file.
+     * @return array<string, CacheEntry|string> table name => `CacheEntry`; a lone `_missing` key holding the cache path
+     *                                          (a string) if there is no cache file.
      */
     public function cache_status(): array
     {
@@ -153,10 +156,14 @@ class Site
         $map = (static fn ($f) => include $f)($file);
         $map = is_array($map) ? $map : [];
 
+        $names = Cast::arr($map['acf_field_names'] ?? null);
+        $tables = Cast::arr($map['tables'] ?? null);
+        $post_types = Cast::arr($map['post_types'] ?? null);
+
         $out = [];
         foreach ($this->table_defs() as $name => $def) {
             $ctx = 'post:'.$def['post_type'];
-            $cached = isset($map['acf_field_names'][$ctx]) ? array_keys((array) $map['acf_field_names'][$ctx]) : [];
+            $cached = isset($names[$ctx]) ? array_keys((array) $names[$ctx]) : [];
             $not = [];
             foreach ($def['columns'] as $col) {
                 if ($col['identifier'] && ! in_array($col['identifier'], $cached, true) && ! in_array($col['name'], $cached, true)) {
@@ -164,9 +171,10 @@ class Site
                 }
             }
 
+            $cache_post_type = Cast::arr(Cast::arr($tables[$name] ?? null)['relationship'] ?? null)['post_type'] ?? null;
             $out[$name] = [
-                'cache_post_type' => $map['tables'][$name]['relationship']['post_type'] ?? null,
-                'intercepting' => isset($map['post_types'][$def['post_type']]),
+                'cache_post_type' => is_string($cache_post_type) ? $cache_post_type : null,
+                'intercepting' => isset($post_types[$def['post_type']]),
                 'not_cached' => $not,
             ];
         }
@@ -177,23 +185,25 @@ class Site
     /**
      * Human-readable problems that mean the plugin is NOT serving a table's data right now.
      *
-     * @return string[]
+     * @return list<string>
      */
     public function cache_problems(): array
     {
         $status = $this->cache_status();
         if (isset($status['_missing'])) {
-            return ["No table map cache at {$status['_missing']} — the plugin is not reading any custom table. Run Create/Update Tables first."];
+            return ['No table map cache at '.Cast::str($status['_missing']).' — the plugin is not reading any custom table. Run Create/Update Tables first.'];
         }
 
         $problems = [];
         foreach ($this->active_defs() as $name => $def) {
-            if (empty($status[$name]['intercepting'])) {
+            $entry = $status[$name] ?? null;
+            $entry = is_array($entry) ? $entry : null;
+            if (empty($entry['intercepting'])) {
                 $problems[] = sprintf(
                     'The plugin is NOT reading %s for "%s" posts — its cache says post type "%s". The site is currently showing postmeta for these posts, not the table. Run Create/Update Tables (Find-a-Doc #813) before migrating, or decide deliberately which copy is current.',
                     $this->prefixed($name),
                     $def['post_type'],
-                    $status[$name]['cache_post_type'] ?: '(none)'
+                    ($entry['cache_post_type'] ?? null) ?: '(none)'
                 );
             }
         }

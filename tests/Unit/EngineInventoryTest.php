@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Brain\Monkey\Functions;
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\HookGuard;
 use UAMSWP_ACFCDT_Migrator\Site;
@@ -36,30 +37,55 @@ require_once __DIR__.'/Fixtures/engine-shims.php';
 
 defined('ARRAY_A') || define('ARRAY_A', 'ARRAY_A');
 
+/** The recorded state of one test: what the `$wpdb` stand-in was asked and what it answers. */
+final class EngInvState
+{
+    /** @var list<array{0: string, 1: array<mixed>}> */
+    public array $prepared = [];
+
+    /** @var list<array{0: string, 1: string, 2: array<mixed>}> */
+    public array $executed = [];
+
+    /** @var array<string, list<mixed>> */
+    public array $returns = [];
+
+    /** @var array<string, array<string, mixed>> */
+    public array $fields = [];
+
+    public int $installs = 0;
+}
+
+/** The state of the running test. */
+function eng_inv_state(): EngInvState
+{
+    $state = $GLOBALS['eng_inv_state'] ?? null;
+    if (! $state instanceof EngInvState) {
+        throw new RuntimeException('The engine inventory test state is not set up.');
+    }
+
+    return $state;
+}
+
 beforeEach(function (): void {
     EngineTestFn::reset();
 
-    $GLOBALS['eng_inv_prepared'] = [];
-    $GLOBALS['eng_inv_executed'] = [];
-    $GLOBALS['eng_inv_returns'] = [];
-    $GLOBALS['eng_inv_fields'] = [];
-    $GLOBALS['eng_inv_installs'] = new ArrayObject;
+    $state = new EngInvState;
+    $GLOBALS['eng_inv_state'] = $state;
 
     when('get_current_blog_id')->justReturn(5);
     when('home_url')->alias(fn (string $path = ''): string => 'https://example.test'.$path);
-    when('absint')->alias(fn (mixed $n): int => abs((int) $n));
+    when('absint')->alias(fn (mixed $n): int => abs((int) Cast::str($n)));
     when('esc_sql')->alias(fn (string $s): string => 'esc('.$s.')');
-    when('acf_get_field')->alias(fn (string $key): array|false => $GLOBALS['eng_inv_fields'][$key] ?? false);
+    when('acf_get_field')->alias(fn (string $key): array|false => $state->fields[$key] ?? false);
 
-    $installs = $GLOBALS['eng_inv_installs'];
-    redefine(Store::class.'::install', function () use ($installs): void {
-        $installs[] = 'install';
+    redefine(Store::class.'::install', function () use ($state): void {
+        $state->installs++;
     });
 });
 
 afterEach(function (): void {
     EngineTestFn::reset();
-    unset($GLOBALS['eng_inv_prepared'], $GLOBALS['eng_inv_executed'], $GLOBALS['eng_inv_returns'], $GLOBALS['eng_inv_fields'], $GLOBALS['eng_inv_installs'], $GLOBALS['wpdb']);
+    unset($GLOBALS['eng_inv_state'], $GLOBALS['wpdb']);
 });
 
 /**
@@ -71,29 +97,30 @@ afterEach(function (): void {
  */
 function eng_inv_wpdb(array $returns = []): MockInterface
 {
-    $GLOBALS['eng_inv_returns'] = $returns;
+    $state = eng_inv_state();
+    $state->returns = $returns;
     /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
-    $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {
-        $GLOBALS['eng_inv_prepared'][] = [$query, $args];
+    $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args) use ($state): string {
+        $state->prepared[] = [$query, $args];
 
         return 'P:'.$query;
     });
 
     foreach (['get_var', 'get_results', 'get_col'] as $method) {
-        $wpdb->shouldReceive($method)->andReturnUsing(function (string $sql, ...$extra) use ($method): mixed {
-            $GLOBALS['eng_inv_executed'][] = [$method, $sql, $extra];
-            if (count($GLOBALS['eng_inv_executed']) > 20) {
+        $wpdb->shouldReceive($method)->andReturnUsing(function (string $sql, ...$extra) use ($method, $state): mixed {
+            $state->executed[] = [$method, $sql, $extra];
+            if (count($state->executed) > 20) {
                 throw new LogicException('Runaway loop: more than 20 statements executed.');
             }
 
-            $queue = &$GLOBALS['eng_inv_returns'][$method];
-            if (! isset($queue) || $queue === []) {
+            $queue = $state->returns[$method] ?? [];
+            if ($queue === []) {
                 return null;
             }
 
-            return count($queue) > 1 ? array_shift($queue) : $queue[0];
+            return count($queue) > 1 ? array_shift($state->returns[$method]) : $queue[0];
         });
     }
 
@@ -115,7 +142,7 @@ function eng_inv_flat(string $sql): string
  */
 function eng_inv_log(): array
 {
-    return array_values(array_map(fn (array $e): array => [$e[0], eng_inv_flat($e[1])], $GLOBALS['eng_inv_executed']));
+    return array_map(fn (array $e): array => [$e[0], eng_inv_flat($e[1])], eng_inv_state()->executed);
 }
 
 /**
@@ -136,6 +163,21 @@ function eng_inv_engine(array $site = []): Engine
 function eng_inv_dash(): string
 {
     return "\u{2014}";
+}
+
+/**
+ * The first table of the inventory, which the test has set up as an existing one.
+ *
+ * @return array{table: string, name: string, post_type: string, def_file: string, exists: true, rows: int, missing_post: int, wrong_type: int, no_row: int, extra_cols: list<string>, missing_cols: list<string>, columns: list<array{column: string, acf_name: string, acf_type: string, non_empty: int, note: string}>, orphans: list<string>}
+ */
+function eng_inv_first_found(Engine $engine): array
+{
+    $table = $engine->inventory()['tables'][0];
+    if ($table['exists'] !== true) {
+        throw new RuntimeException('The first table of the inventory is missing.');
+    }
+
+    return $table;
 }
 
 // acf_ready()
@@ -160,10 +202,16 @@ it('checks the groups function only when the value function exists', function ()
     expect(EngineTestFn::$calls)->toBe(['acf_get_value']);
 });
 
+/** Calls `clean_ref()` with the name exactly as given, whatever its type (the datasets hand it null and integers). */
+function eng_inv_clean(mixed $ref): string
+{
+    return Cast::str((new ReflectionMethod(Engine::class, 'clean_ref'))->invoke(null, $ref));
+}
+
 // clean_ref()
 
 it('accepts names of letters, numbers, dot, dash and underscore', function (mixed $ref, string $expected): void {
-    expect(Engine::clean_ref($ref))->toBe($expected);
+    expect(eng_inv_clean($ref))->toBe($expected);
 })->with([
     'letters' => ['before', 'before'],
     'all allowed characters' => ['A-z_0.9', 'A-z_0.9'],
@@ -173,7 +221,7 @@ it('accepts names of letters, numbers, dot, dash and underscore', function (mixe
 ]);
 
 it('rejects a name that is empty, too long or has other characters', function (mixed $ref, string $shown): void {
-    expect(fn (): string => Engine::clean_ref($ref))->toThrow(
+    expect(fn (): string => eng_inv_clean($ref))->toThrow(
         InvalidArgumentException::class,
         "Names may only contain letters, numbers, dot, dash and underscore (max 60): '$shown'"
     );
@@ -194,7 +242,7 @@ it('builds a Site when none is given and installs the table', function (): void 
     expect($engine->site)->toBeInstanceOf(Site::class)
         ->and($engine->site->blog_id)->toBe(5)
         ->and($engine->site->url)->toBe('https://example.test/')
-        ->and(count($GLOBALS['eng_inv_installs']))->toBe(1);
+        ->and(eng_inv_state()->installs)->toBe(1);
 });
 
 it('keeps the Site it is given', function (): void {
@@ -203,7 +251,7 @@ it('keeps the Site it is given', function (): void {
     $engine = new Engine($site);
 
     expect($engine->site)->toBe($site)
-        ->and(count($GLOBALS['eng_inv_installs']))->toBe(1);
+        ->and(eng_inv_state()->installs)->toBe(1);
 });
 
 // total_posts()
@@ -246,20 +294,20 @@ it('counts the posts at or below a cursor', function (): void {
 
     $count = $engine->posts_upto('12');
 
-    [$query, $args] = $GLOBALS['eng_inv_prepared'][0];
+    [$query, $args] = eng_inv_state()->prepared[0];
     expect($count)->toBe(7)
         ->and(eng_inv_flat($query))->toBe("SELECT COUNT(*) FROM wpx_posts WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID <= %d")
         ->and($args)->toBe([['doctor', 'clinic', 12]])
-        ->and($GLOBALS['eng_inv_executed'][0][0])->toBe('get_var')
-        ->and($GLOBALS['eng_inv_executed'][0][1])->toBe('P:'.$query);
+        ->and(eng_inv_state()->executed[0][0])->toBe('get_var')
+        ->and(eng_inv_state()->executed[0][1])->toBe('P:'.$query);
 });
 
 it('counts nothing without post types or without a cursor, and runs no query', function (array $types, mixed $cursor): void {
     eng_inv_wpdb();
     $engine = eng_inv_engine(['post_types' => fn (): array => $types]);
 
-    expect($engine->posts_upto($cursor))->toBe(0)
-        ->and($GLOBALS['eng_inv_executed'])->toBe([]);
+    expect(Cast::int((new ReflectionMethod(Engine::class, 'posts_upto'))->invoke($engine, $cursor)))->toBe(0)
+        ->and(eng_inv_state()->executed)->toBe([]);
 })->with([
     'no types' => [[], 10],
     'cursor zero' => [['doctor'], 0],
@@ -290,7 +338,7 @@ it('pages posts above a cursor in ascending order', function (): void {
 
     $rows = eng_inv_next($engine, '9', 25);
 
-    [$query, $args] = $GLOBALS['eng_inv_prepared'][0];
+    [$query, $args] = eng_inv_state()->prepared[0];
     expect($rows)->toBe(['row'])
         ->and(eng_inv_flat($query))->toBe("SELECT ID, post_type, post_status, post_title, post_modified FROM wpx_posts WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID > %d")
         ->and($args)->toBe([['doctor', 'clinic', 9]])
@@ -309,7 +357,7 @@ it('returns no posts, and runs no query, when the site has no post types', funct
     $engine = eng_inv_engine(['post_types' => fn (): array => []]);
 
     expect(eng_inv_next($engine, 0, 10))->toBe([])
-        ->and($GLOBALS['eng_inv_executed'])->toBe([]);
+        ->and(eng_inv_state()->executed)->toBe([]);
 });
 
 it('restricts the page to the given ids as integers', function (): void {
@@ -318,8 +366,8 @@ it('restricts the page to the given ids as integers', function (): void {
 
     eng_inv_next($engine, 0, 10, ['5', '7abc', -3]);
 
-    expect($GLOBALS['eng_inv_executed'][0][1])->toStartWith('P:SELECT ID, post_type')
-        ->and($GLOBALS['eng_inv_executed'][0][1])->toEndWith(' AND ID > %d AND ID IN (5,7,3) ORDER BY ID ASC LIMIT 10');
+    expect(eng_inv_state()->executed[0][1])->toStartWith('P:SELECT ID, post_type')
+        ->and(eng_inv_state()->executed[0][1])->toEndWith(' AND ID > %d AND ID IN (5,7,3) ORDER BY ID ASC LIMIT 10');
 });
 
 it('adds no id restriction for an empty list', function (): void {
@@ -328,8 +376,8 @@ it('adds no id restriction for an empty list', function (): void {
 
     eng_inv_next($engine, 0, 10, []);
 
-    expect($GLOBALS['eng_inv_executed'][0][1])->not->toContain(' AND ID IN (')
-        ->and($GLOBALS['eng_inv_executed'][0][1])->toEndWith(' ORDER BY ID ASC LIMIT 10');
+    expect(eng_inv_state()->executed[0][1])->not->toContain(' AND ID IN (')
+        ->and(eng_inv_state()->executed[0][1])->toEndWith(' ORDER BY ID ASC LIMIT 10');
 });
 
 it('limits to at least one row', function (mixed $limit, string $expected): void {
@@ -338,7 +386,7 @@ it('limits to at least one row', function (mixed $limit, string $expected): void
 
     eng_inv_next($engine, 0, $limit);
 
-    expect($GLOBALS['eng_inv_executed'][0][1])->toEndWith('LIMIT '.$expected);
+    expect(eng_inv_state()->executed[0][1])->toEndWith('LIMIT '.$expected);
 })->with([
     'zero' => [0, '1'],
     'negative' => [-5, '1'],
@@ -422,7 +470,7 @@ it('lists a missing table without querying it', function (): void {
     expect($engine->inventory()['tables'])->toBe([
         ['table' => 'wpx_doctors', 'name' => 'doctors', 'post_type' => 'doctor', 'def_file' => 'doctors.json', 'exists' => false],
     ])
-        ->and($GLOBALS['eng_inv_executed'])->toBe([]);
+        ->and(eng_inv_state()->executed)->toBe([]);
 });
 
 it('measures an existing table with one query per figure', function (): void {
@@ -432,7 +480,7 @@ it('measures an existing table with one query per figure', function (): void {
     ]);
     $engine = eng_inv_wire([eng_inv_def('doctors', 'doctor', [['name' => 'extra', 'identifier' => '']], '/a/b/doctors.json')], ['doctors']);
 
-    $table = $engine->inventory()['tables'][0];
+    $table = eng_inv_first_found($engine);
 
     expect($table)->toBe([
         'table' => 'wpx_doctors',
@@ -456,8 +504,8 @@ it('measures an existing table with one query per figure', function (): void {
         ->and($log[2])->toBe(['get_var', 'P:SELECT COUNT(*) FROM `wpx_doctors` t JOIN wpx_posts p ON p.ID = t.post_id WHERE p.post_type <> %s'])
         ->and($log[3])->toBe(['get_var', "P:SELECT COUNT(*) FROM wpx_posts p LEFT JOIN `wpx_doctors` t ON t.post_id = p.ID WHERE p.post_type = %s AND p.post_status NOT IN ('auto-draft','inherit') AND t.post_id IS NULL"])
         ->and($log[4])->toBe(['get_col', 'SHOW COLUMNS FROM `wpx_doctors`'])
-        ->and($GLOBALS['eng_inv_prepared'][0][1])->toBe(['doctor'])
-        ->and($GLOBALS['eng_inv_prepared'][1][1])->toBe(['doctor']);
+        ->and(eng_inv_state()->prepared[0][1])->toBe(['doctor'])
+        ->and(eng_inv_state()->prepared[1][1])->toBe(['doctor']);
 });
 
 it('lists columns present in the database but not the definition, and the reverse', function (): void {
@@ -468,7 +516,7 @@ it('lists columns present in the database but not the definition, and the revers
     $defs = [eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => ''], ['name' => 'b', 'identifier' => ''], ['name' => 'c', 'identifier' => '']])];
     $engine = eng_inv_wire($defs, ['t']);
 
-    $table = $engine->inventory()['tables'][0];
+    $table = eng_inv_first_found($engine);
 
     expect($table['extra_cols'])->toBe(['id', 'z'])
         ->and($table['missing_cols'])->toBe(['b', 'c']);
@@ -479,7 +527,7 @@ it('reports one entry per identified column found in the database', function ():
         'get_var' => ['1', '0', '0', '0', '5', '0'],
         'get_col' => [['id', 'a', 'b', 'skipped'], ['id', 'a', 'b', 'skipped']],
     ]);
-    $GLOBALS['eng_inv_fields'] = [
+    eng_inv_state()->fields = [
         'field_a' => ['type' => 'text', 'name' => 'a'],
         'b' => ['type' => 'text', 'name' => 'b'],
     ];
@@ -491,7 +539,7 @@ it('reports one entry per identified column found in the database', function ():
     ])];
     $engine = eng_inv_wire($defs, ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'])->toBe([
+    expect(eng_inv_first_found($engine)['columns'])->toBe([
         ['column' => 'a', 'acf_name' => 'field_a *', 'acf_type' => 'text', 'non_empty' => 5, 'note' => ''],
         ['column' => 'b', 'acf_name' => 'b', 'acf_type' => 'text', 'non_empty' => 0, 'note' => ''],
     ]);
@@ -506,29 +554,29 @@ it('matches a column name to the database with strict comparison', function (): 
         'get_var' => ['0', '0', '0', '0'],
         'get_col' => [['1e1'], ['1e1']],
     ]);
-    $GLOBALS['eng_inv_fields'] = ['field_ten' => ['type' => 'text', 'name' => 'ten']];
+    eng_inv_state()->fields = ['field_ten' => ['type' => 'text', 'name' => 'ten']];
     $defs = [eng_inv_def('t', 'doctor', [['name' => '10', 'identifier' => 'field_ten']])];
     $engine = eng_inv_wire($defs, ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'])->toBe([]);
+    expect(eng_inv_first_found($engine)['columns'])->toBe([]);
 });
 
 it('notes a column whose ACF field is gone', function (): void {
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '2'], 'get_col' => [['a'], ['a']]]);
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_gone']])], ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'])->toBe([
+    expect(eng_inv_first_found($engine)['columns'])->toBe([
         ['column' => 'a', 'acf_name' => 'field_gone *', 'acf_type' => '-', 'non_empty' => 2, 'note' => 'ORPHAN: no ACF field by this name '.eng_inv_dash().' archive only'],
     ]);
 });
 
 it('treats every column as an orphan when ACF cannot look fields up', function (): void {
     EngineTestFn::$answers = ['acf_get_field' => false];
-    $GLOBALS['eng_inv_fields'] = ['field_a' => ['type' => 'text', 'name' => 'a']];
+    eng_inv_state()->fields = ['field_a' => ['type' => 'text', 'name' => 'a']];
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '0'], 'get_col' => [['a'], ['a']]]);
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_a']])], ['t']);
 
-    $column = $engine->inventory()['tables'][0]['columns'][0];
+    $column = eng_inv_first_found($engine)['columns'][0];
 
     expect($column['acf_type'])->toBe('-')
         ->and($column['note'])->toStartWith('ORPHAN')
@@ -537,29 +585,29 @@ it('treats every column as an orphan when ACF cannot look fields up', function (
 
 it('names the parent of a nested field', function (): void {
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '0'], 'get_col' => [['a'], ['a']]]);
-    $GLOBALS['eng_inv_fields'] = [
+    eng_inv_state()->fields = [
         'field_a' => ['type' => 'text', 'name' => 'a', 'parent' => 'field_group'],
         'field_group' => ['type' => 'group', 'name' => 'details'],
     ];
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_a']])], ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'][0]['note'])->toBe('nested inside group "details" '.eng_inv_dash().' plugin likely never intercepted it');
+    expect(eng_inv_first_found($engine)['columns'][0]['note'])->toBe('nested inside group "details" '.eng_inv_dash().' plugin likely never intercepted it');
 });
 
 it('falls back to the parent key when the parent cannot be found', function (): void {
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '0'], 'get_col' => [['a'], ['a']]]);
-    $GLOBALS['eng_inv_fields'] = ['field_a' => ['type' => 'text', 'name' => 'a', 'parent' => 'field_missing']];
+    eng_inv_state()->fields = ['field_a' => ['type' => 'text', 'name' => 'a', 'parent' => 'field_missing']];
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_a']])], ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'][0]['note'])->toBe('nested inside field_missing '.eng_inv_dash().' plugin likely never intercepted it');
+    expect(eng_inv_first_found($engine)['columns'][0]['note'])->toBe('nested inside field_missing '.eng_inv_dash().' plugin likely never intercepted it');
 });
 
 it('does not treat a parent that is not a field key as nesting', function (mixed $parent): void {
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '0'], 'get_col' => [['a'], ['a']]]);
-    $GLOBALS['eng_inv_fields'] = ['field_a' => ['type' => 'text', 'name' => 'a', 'parent' => $parent]];
+    eng_inv_state()->fields = ['field_a' => ['type' => 'text', 'name' => 'a', 'parent' => $parent]];
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_a']])], ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'][0]['note'])->toBe('');
+    expect(eng_inv_first_found($engine)['columns'][0]['note'])->toBe('');
 })->with([
     'a post id' => [123],
     'a list' => [['field_x']],
@@ -571,10 +619,10 @@ it('does not treat a parent that is not a field key as nesting', function (mixed
 
 it('notes the field types the plugin does not support or encodes', function (string $type, string $note): void {
     eng_inv_wpdb(['get_var' => ['0', '0', '0', '0', '0'], 'get_col' => [['a'], ['a']]]);
-    $GLOBALS['eng_inv_fields'] = ['field_a' => ['type' => $type, 'name' => 'a']];
+    eng_inv_state()->fields = ['field_a' => ['type' => $type, 'name' => 'a']];
     $engine = eng_inv_wire([eng_inv_def('t', 'doctor', [['name' => 'a', 'identifier' => 'field_a']])], ['t']);
 
-    expect($engine->inventory()['tables'][0]['columns'][0]['note'])->toBe(str_replace('~', eng_inv_dash(), $note));
+    expect(eng_inv_first_found($engine)['columns'][0]['note'])->toBe(str_replace('~', eng_inv_dash(), $note));
 })->with([
     'group' => ['group', 'group ~ unsupported by plugin, values likely in postmeta'],
     'clone' => ['clone', 'clone ~ unsupported by plugin, values likely in postmeta'],
@@ -590,7 +638,7 @@ it('lists database columns with no ACF field, skipping the key columns', functio
     eng_inv_wpdb(['get_col' => [['id', 'post_id', 'known', 'gone', 'unnamed', 'absent']]]);
     when('acf_get_field')->alias(fn (string $key): array|false => $key === 'field_gone' ? false : ['type' => 'text']);
     $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
-    $def = ['name' => 't', 'columns' => [
+    $def = ['name' => 't', 'post_type' => 'doctor', 'file' => 't.json', 'columns' => [
         ['name' => 'known', 'identifier' => 'field_known'],
         ['name' => 'gone', 'identifier' => 'field_gone'],
         ['name' => 'unnamed', 'identifier' => ''],
@@ -602,10 +650,10 @@ it('lists database columns with no ACF field, skipping the key columns', functio
 
 it('lists nothing when every column has a field', function (): void {
     eng_inv_wpdb(['get_col' => [['id', 'a']]]);
-    $GLOBALS['eng_inv_fields'] = ['field_a' => ['type' => 'text']];
+    eng_inv_state()->fields = ['field_a' => ['type' => 'text']];
     $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
 
-    expect($engine->orphan_columns(['name' => 't', 'columns' => [['name' => 'a', 'identifier' => 'field_a']]]))->toBe([]);
+    expect($engine->orphan_columns(['name' => 't', 'post_type' => 'doctor', 'file' => 't.json', 'columns' => [['name' => 'a', 'identifier' => 'field_a']]]))->toBe([]);
 });
 
 it('lists every table, a missing one among them', function (): void {
@@ -648,12 +696,12 @@ it('streams every row of a table with an id, paging by id', function (): void {
         ->and($seen)->toHaveCount(503)
         ->and($seen[0])->toBe('1')
         ->and($seen[502])->toBe('503')
-        ->and($GLOBALS['eng_inv_prepared'])->toBe([
+        ->and(eng_inv_state()->prepared)->toBe([
             ['SELECT * FROM `wpx_doctors` WHERE id > %d ORDER BY id ASC LIMIT 500', [0]],
             ['SELECT * FROM `wpx_doctors` WHERE id > %d ORDER BY id ASC LIMIT 500', [500]],
         ])
-        ->and($GLOBALS['eng_inv_executed'][1][0])->toBe('get_results')
-        ->and($GLOBALS['eng_inv_executed'][1][2])->toBe(['ARRAY_A'])
+        ->and(eng_inv_state()->executed[1][0])->toBe('get_results')
+        ->and(eng_inv_state()->executed[1][2])->toBe(['ARRAY_A'])
         ->and(eng_inv_log()[0])->toBe(['get_col', 'SHOW COLUMNS FROM `wpx_doctors`']);
 });
 
@@ -668,12 +716,12 @@ it('pages a table with no id column by offset', function (): void {
 
     expect($total)->toBe(700)
         ->and($count)->toBe(700)
-        ->and($GLOBALS['eng_inv_prepared'])->toBe([])
+        ->and(eng_inv_state()->prepared)->toBe([])
         ->and(array_column(array_slice(eng_inv_log(), 1), 1))->toBe([
             'SELECT * FROM `wpx_t` LIMIT 500 OFFSET 0',
             'SELECT * FROM `wpx_t` LIMIT 500 OFFSET 500',
         ])
-        ->and($GLOBALS['eng_inv_executed'][1][2])->toBe(['ARRAY_A']);
+        ->and(eng_inv_state()->executed[1][2])->toBe(['ARRAY_A']);
 });
 
 it('stops after a short page and after a full page followed by an empty one', function (int $first, int $queries, int $total): void {
@@ -681,7 +729,7 @@ it('stops after a short page and after a full page followed by an empty one', fu
     $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
 
     expect($engine->each_table_row('t', fn (array $row): null => null))->toBe($total)
-        ->and(count($GLOBALS['eng_inv_executed']) - 1)->toBe($queries);
+        ->and(count(eng_inv_state()->executed) - 1)->toBe($queries);
 })->with([
     'none' => [0, 1, 0],
     'one short of a page' => [499, 1, 499],
@@ -695,5 +743,5 @@ it('treats a column list without an exact id column as having none', function ()
 
     $engine->each_table_row('t', fn (array $row): null => null);
 
-    expect($GLOBALS['eng_inv_executed'][1][1])->toBe('SELECT * FROM `wpx_t` LIMIT 500 OFFSET 0');
+    expect(eng_inv_state()->executed[1][1])->toBe('SELECT * FROM `wpx_t` LIMIT 500 OFFSET 0');
 });

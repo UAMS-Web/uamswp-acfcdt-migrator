@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Brain\Monkey\Functions;
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Command;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\Site;
@@ -38,22 +39,65 @@ require_once __DIR__.'/Fixtures/process-shims.php';
 defined('ARRAY_A') || define('ARRAY_A', 'ARRAY_A');
 defined('UAMSWP_ACFCDT_MIGRATOR_FILE') || define('UAMSWP_ACFCDT_MIGRATOR_FILE', '/plugins/uamswp-acfcdt-migrator/uamswp-acfcdt-migrator.php');
 
+/**
+ * What the WP-CLI helper mocks recorded for the current test, typed once here so no test reads it back as `mixed`.
+ */
+final class CommandTestState
+{
+    /** @var list<array<int, mixed>> */
+    public static array $tables = [];
+
+    /** @var list<CommandTestProgressBar> */
+    public static array $bars = [];
+
+    public static int $cache_clears = 0;
+
+    /** @var list<string> */
+    public static array $dirs = [];
+
+    /** @var list<array<string, mixed>> */
+    public static array $sites_args = [];
+
+    public static int $var_calls = 0;
+
+    /** @var list<array{string|null, string}> */
+    public static array $out_dir_args = [];
+
+    public static function reset(): void
+    {
+        self::$tables = [];
+        self::$bars = [];
+        self::$cache_clears = 0;
+        self::$dirs = [];
+        self::$sites_args = [];
+        self::$var_calls = 0;
+        self::$out_dir_args = [];
+    }
+
+    public static function bar(int $index): CommandTestProgressBar
+    {
+        return self::$bars[$index] ?? throw new LogicException("No progress bar $index was made.");
+    }
+}
+
 beforeEach(function (): void {
     CommandTestProcess::reset();
+    CommandTestState::reset();
     CommandTestCli::$calls = [];
     CommandTestCli::$runner = (object) ['config' => []];
 
-    $GLOBALS['cmd_tables'] = [];
-    $GLOBALS['cmd_bars'] = [];
-    $GLOBALS['cmd_cache_clears'] = 0;
-
     when('WP_CLI\Utils\get_flag_value')->alias(fn ($assoc, $flag, $default = null) => $assoc[$flag] ?? $default);
     when('WP_CLI\Utils\format_items')->alias(function ($format, $items, $fields): void {
-        $GLOBALS['cmd_tables'][] = [$format, $items, $fields];
+        CommandTestState::$tables[] = [$format, $items, $fields];
     });
-    when('WP_CLI\Utils\make_progress_bar')->alias(fn ($message, $count): CommandTestProgressBar => $GLOBALS['cmd_bars'][] = new CommandTestProgressBar($message, $count));
+    when('WP_CLI\Utils\make_progress_bar')->alias(function ($message, $count): CommandTestProgressBar {
+        $bar = new CommandTestProgressBar($message, $count);
+        CommandTestState::$bars[] = $bar;
+
+        return $bar;
+    });
     when('WP_CLI\Utils\wp_clear_object_cache')->alias(function (): void {
-        $GLOBALS['cmd_cache_clears']++;
+        CommandTestState::$cache_clears++;
     });
     when('get_current_blog_id')->justReturn(7);
     when('home_url')->justReturn('https://example.test/');
@@ -65,12 +109,12 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    foreach ($GLOBALS['cmd_dirs'] ?? [] as $dir) {
+    foreach (CommandTestState::$dirs as $dir) {
         array_map(unlink(...), glob($dir.'/*') ?: []);
         @rmdir($dir);
     }
 
-    unset($GLOBALS['cmd_dirs'], $GLOBALS['cmd_tables'], $GLOBALS['cmd_bars'], $GLOBALS['cmd_cache_clears'], $GLOBALS['cmd_sites_args'], $GLOBALS['cmd_var_calls'], $GLOBALS['wpdb']);
+    unset($GLOBALS['wpdb']);
 });
 
 /**
@@ -117,6 +161,27 @@ function cmd_header(): array
     return [['log', ''], ['log', '%Y### Site 7: https://example.test/%n']];
 }
 
+/**
+ * Every message WP_CLI was given for one kind of call, as text, for a check on the whole transcript.
+ *
+ * @return list<string>
+ */
+function cmd_call_text(string $type): array
+{
+    return array_map(Cast::str(...), cmd_calls($type));
+}
+
+/**
+ * One entry a mocked engine or child-process closure recorded, read back as a list.
+ *
+ * @param  ArrayObject<int, mixed>  $seen
+ * @return array<int, mixed>
+ */
+function cmd_seen(ArrayObject $seen, int $index): array
+{
+    return Cast::arr($seen[$index]);
+}
+
 it('stops with an error when ACF is not loaded', function (): void {
     redefine(Engine::class.'::acf_ready', fn (): bool => false);
 
@@ -129,7 +194,7 @@ it('lists nothing stored yet when there are no snapshots and no runs', function 
     (new Command)->status([], []);
 
     expect(CommandTestCli::$calls)->toBe([...cmd_header(), ['log', '   nothing stored yet']])
-        ->and($GLOBALS['cmd_tables'])->toBe([]);
+        ->and(CommandTestState::$tables)->toBe([]);
 });
 
 it('lists snapshots and runs as one table', function (): void {
@@ -152,7 +217,7 @@ it('lists snapshots and runs as one table', function (): void {
 
     (new Command)->status([], []);
 
-    expect($GLOBALS['cmd_tables'])->toBe([[
+    expect(CommandTestState::$tables)->toBe([[
         'table',
         [
             ['type' => 'snapshot', 'name' => 'before', 'detail' => 'effective', 'status' => 'done', 'when' => '2026-01-01'],
@@ -239,7 +304,7 @@ it('turns a refused rollback into a CLI error', function (): void {
 /**
  * @param  ArrayObject<int, mixed>  $seen
  * @param  list<array<string, mixed>>  $batches
- * @return array<string, mixed>
+ * @return array<string, Closure>
  */
 function cmd_snapshot_engine(ArrayObject $seen, array $batches = []): array
 {
@@ -276,7 +341,7 @@ it('snapshots in batches of 50, ticking the bar and clearing the object cache af
 
     (new Command)->snapshot(['before'], ['mode' => 'meta', 'force' => true]);
 
-    $bar = $GLOBALS['cmd_bars'][0];
+    $bar = CommandTestState::bar(0);
 
     expect($seen->getArrayCopy())->toBe([
         ['start', 'before', 'meta', true],
@@ -288,7 +353,7 @@ it('snapshots in batches of 50, ticking the bar and clearing the object cache af
         ->and($bar->count)->toBe(12)
         ->and($bar->ticks)->toBe(3)
         ->and($bar->finished)->toBeTrue()
-        ->and($GLOBALS['cmd_cache_clears'])->toBe(2)
+        ->and(CommandTestState::$cache_clears)->toBe(2)
         ->and(cmd_calls('success'))->toBe(["Site 7: snapshot \"label-before\" \u{2014} 12 posts, 7 non-empty values."])
         ->and(array_slice(CommandTestCli::$calls, 0, 2))->toBe(cmd_header());
 });
@@ -348,7 +413,7 @@ it('compares two snapshots and reports they are identical', function (): void {
     (new Command)->compare(['before', 'after'], []);
 
     expect($seen->getArrayCopy())->toBe(['before', 'after', []])
-        ->and($GLOBALS['cmd_tables'])->toBe([['table', [['posts' => 5]], ['posts']]])
+        ->and(CommandTestState::$tables)->toBe([['table', [['posts' => 5]], ['posts']]])
         ->and(cmd_calls('success'))->toBe(["'before' and 'after' are identical."])
         ->and(cmd_calls('warning'))->toBe([])
         ->and(cmd_calls('halt'))->toBe([]);
@@ -393,7 +458,7 @@ it('prints each difference up to the limit, then warns and halts with 1', functi
     ])
         ->and(cmd_calls('warning'))->toBe(["3 difference(s) between 'before' and 'after'."])
         ->and(cmd_calls('success'))->toBe([])
-        ->and($GLOBALS['cmd_tables'])->toBe([['table', [['changed' => 3, 'posts' => 5]], ['changed', 'posts']]]);
+        ->and(CommandTestState::$tables)->toBe([['table', [['changed' => 3, 'posts' => 5]], ['changed', 'posts']]]);
 });
 
 it('prints up to 25 differences by default', function (): void {
@@ -405,7 +470,7 @@ it('prints up to 25 differences by default', function (): void {
     } catch (RuntimeException) {
     }
 
-    expect(count(array_filter(cmd_calls('log'), fn ($m): bool => str_starts_with((string) $m, 'post '))))->toBe(25);
+    expect(count(array_filter(cmd_calls('log'), fn ($m): bool => str_starts_with(Cast::str($m), 'post '))))->toBe(25);
 });
 
 it('truncates a long value in a difference to 160 characters', function (): void {
@@ -517,7 +582,7 @@ it('backfills in batches of 20, surfacing batch warnings and the change table', 
 
     (new Command)->backfill([], ['stamp' => 's1', 'no-clear' => true, 'allow-stale-cache' => true, 'ids' => '4,6']);
 
-    $bar = $GLOBALS['cmd_bars'][0];
+    $bar = CommandTestState::bar(0);
 
     expect($seen->getArrayCopy())->toBe([
         ['start', false, true, 's1', true],
@@ -530,9 +595,9 @@ it('backfills in batches of 20, surfacing batch warnings and the change table', 
         ->and($bar->count)->toBe(40)
         ->and($bar->ticks)->toBe(22)
         ->and($bar->finished)->toBeTrue()
-        ->and($GLOBALS['cmd_cache_clears'])->toBe(2)
+        ->and(CommandTestState::$cache_clears)->toBe(2)
         ->and(cmd_calls('warning'))->toBe(['w1', 'w2'])
-        ->and($GLOBALS['cmd_tables'])->toBe([['table', $by_field, ['field', 'fill', 'overwrite', 'clear']]])
+        ->and(CommandTestState::$tables)->toBe([['table', $by_field, ['field', 'fill', 'overwrite', 'clear']]])
         ->and(cmd_calls('log'))->toContain('Stats: {"fields":6,"posts":2,"write_mismatch":0}')
         ->and(cmd_calls('success'))->toBe(['Site 7: run run-s1 '."\u{2014}".' 2 posts / 6 fields backfilled.'])
         ->and(array_slice(CommandTestCli::$calls, 0, 2))->toBe(cmd_header());
@@ -545,7 +610,7 @@ it('prints no change table when no field changed', function (): void {
 
     (new Command)->backfill([], ['stamp' => 's1']);
 
-    expect($GLOBALS['cmd_tables'])->toBe([])
+    expect(CommandTestState::$tables)->toBe([])
         ->and($seen[0])->toBe(['start', false, false, 's1', false])
         ->and($seen[1])->toBe(['total', null]);
 });
@@ -557,11 +622,11 @@ it('marks a dry run in the bar, the default run name and the closing line', func
 
     (new Command)->backfill([], ['dry-run' => true]);
 
-    expect($seen[0][0])->toBe('start')
-        ->and($seen[0][1])->toBeTrue()
-        ->and($seen[0][3])->toMatch('/^\d{8}-\d{6}-dry$/')
-        ->and($GLOBALS['cmd_bars'][0]->message)->toBe("[DRY RUN] Backfill \u{2013} 40 posts")
-        ->and(cmd_calls('success'))->toBe(['[DRY RUN] Site 7: run run-'.$seen[0][3]." \u{2014} 2 posts / 6 fields would change."]);
+    expect(cmd_seen($seen, 0)[0])->toBe('start')
+        ->and(cmd_seen($seen, 0)[1])->toBeTrue()
+        ->and(cmd_seen($seen, 0)[3])->toMatch('/^\d{8}-\d{6}-dry$/')
+        ->and(CommandTestState::bar(0)->message)->toBe("[DRY RUN] Backfill \u{2013} 40 posts")
+        ->and(cmd_calls('success'))->toBe(['[DRY RUN] Site 7: run run-'.Cast::str(cmd_seen($seen, 0)[3])." \u{2014} 2 posts / 6 fields would change."]);
 });
 
 it('names a real run by the time alone', function (): void {
@@ -571,7 +636,7 @@ it('names a real run by the time alone', function (): void {
 
     (new Command)->backfill([], []);
 
-    expect($seen[0][3])->toMatch('/^\d{8}-\d{6}$/');
+    expect(cmd_seen($seen, 0)[3])->toMatch('/^\d{8}-\d{6}$/');
 });
 
 it('warns and halts with 1 when a write did not stick', function (): void {
@@ -646,7 +711,7 @@ it('describes the plugin table map cache for each table, skipping the missing ma
     expect(cmd_calls('log'))->toContain("Table map cache for provider: post type \"provider\" \u{2014} plugin IS reading this table; 2 mapped column(s) not in cache (served from postmeta)")
         ->and(cmd_calls('log'))->toContain("Table map cache for location: post type \"(none)\" \u{2014} plugin is NOT reading this table")
         ->and(cmd_calls('log'))->toContain("Table map cache for clinic: post type \"clinic\" \u{2014} plugin IS reading this table")
-        ->and(implode("\n", cmd_calls('log')))->not->toContain('_missing')
+        ->and(implode("\n", cmd_call_text('log')))->not->toContain('_missing')
         ->and(cmd_calls('warning'))->toBe(['problem one', 'problem two']);
 });
 
@@ -662,7 +727,7 @@ it('prints a table that does not exist on this site and moves on', function (): 
         ['log', '%G== wp_provider%n  (post type: provider, def: table_provider.json)'],
         ['log', '   table does not exist on this site'],
     ])
-        ->and($GLOBALS['cmd_tables'])->toBe([]);
+        ->and(CommandTestState::$tables)->toBe([]);
 });
 
 it('goes on to the next table after one that does not exist', function (): void {
@@ -693,7 +758,7 @@ it('prints the row counts, the column differences and the column table for an ex
         ['log', '   columns in DB but not in JSON: x1, x2'],
         ['warning', '   columns in JSON but missing from DB: m1'],
     ])
-        ->and($GLOBALS['cmd_tables'])->toBe([['json', $columns, ['column', 'acf_name', 'acf_type', 'non_empty', 'note']]]);
+        ->and(CommandTestState::$tables)->toBe([['json', $columns, ['column', 'acf_name', 'acf_type', 'non_empty', 'note']]]);
 });
 
 it('prints a table in the table format by default and skips empty column lists', function (): void {
@@ -705,9 +770,9 @@ it('prints a table in the table format by default and skips empty column lists',
 
     (new Command)->inventory([], []);
 
-    expect($GLOBALS['cmd_tables'][0][0])->toBe('table')
+    expect(CommandTestState::$tables[0][0])->toBe('table')
         ->and(cmd_calls('warning'))->toBe([])
-        ->and(implode("\n", cmd_calls('log')))->not->toContain('columns in DB but not in JSON');
+        ->and(implode("\n", cmd_call_text('log')))->not->toContain('columns in DB but not in JSON');
 });
 
 /**
@@ -720,10 +785,10 @@ it('prints a table in the table format by default and skips empty column lists',
 function cmd_network(array $sites, array $table_names = ['provider']): MockInterface
 {
     when('is_multisite')->justReturn(true);
-    $GLOBALS['cmd_sites_args'] = [];
-    $GLOBALS['cmd_var_calls'] = 0;
+    CommandTestState::$sites_args = [];
+    CommandTestState::$var_calls = 0;
     when('get_sites')->alias(function (array $args) use ($sites): array {
-        $GLOBALS['cmd_sites_args'][] = $args;
+        CommandTestState::$sites_args[] = $args;
 
         return array_map(fn (array $s): object => (object) ['blog_id' => $s[0], 'domain' => $s[1], 'path' => $s[2]], $sites);
     });
@@ -741,7 +806,7 @@ function cmd_network(array $sites, array $table_names = ['provider']): MockInter
     $wpdb->shouldReceive('esc_like')->andReturnUsing(fn (string $s): string => $s);
     $wpdb->shouldReceive('prepare')->andReturnUsing(fn (string $q, string $v): string => $q.'|'.$v);
     $wpdb->shouldReceive('get_var')->andReturnUsing(function (string $q) use ($has): ?string {
-        $GLOBALS['cmd_var_calls']++;
+        CommandTestState::$var_calls++;
         [$sql, $name] = explode('|', $q);
 
         // LIKE: `_` stands for any one character, so a table can match a name it is not equal to.
@@ -823,7 +888,7 @@ it('runs the subcommand once per site with custom tables and skips the rest', fu
 
     (new Command)->status(['x'], ['network' => true, 'json-dir' => '/j']);
 
-    expect($GLOBALS['cmd_sites_args'])->toBe([['number' => 0, 'deleted' => 0]])
+    expect(CommandTestState::$sites_args)->toBe([['number' => 0, 'deleted' => 0]])
         ->and($seen->getArrayCopy())->toBe([
             ['acfcdt-migrate status', ['x'], ['json-dir' => '/j', 'require' => UAMSWP_ACFCDT_MIGRATOR_FILE], 'a.test/'],
             ['acfcdt-migrate status', ['x'], ['json-dir' => '/j', 'require' => UAMSWP_ACFCDT_MIGRATOR_FILE], 'c.test/'],
@@ -843,7 +908,7 @@ it("stops looking for a site's tables at the first one it has", function (): voi
     (new Command)->status([], ['network' => true]);
 
     expect($seen->count())->toBe(1)
-        ->and($GLOBALS['cmd_var_calls'])->toBe(1);
+        ->and(CommandTestState::$var_calls)->toBe(1);
 });
 
 it('looks past a table a site lacks to the next one', function (): void {
@@ -876,7 +941,7 @@ it('passes the plugin skip lists on to the child processes', function (array $co
 
     (new Command)->status([], ['network' => true]);
 
-    expect($seen[0][2])->toBe(['require' => UAMSWP_ACFCDT_MIGRATOR_FILE] + $expected);
+    expect(cmd_seen($seen, 0)[2])->toBe(['require' => UAMSWP_ACFCDT_MIGRATOR_FILE] + $expected);
 })->with([
     'none' => [[], []],
     'empty values' => [['skip-plugins' => '', 'skip-themes' => []], []],
@@ -1021,21 +1086,20 @@ it('returns 1 from a child that could not be started', function (): void {
  * Site's active definitions.
  *
  * @param  list<array<string, mixed>>  $defs
- * @param  array<string, array<string, mixed>>  $tables
+ * @param  array<string, array{columns: list<string>, results?: array<string, list<array<string, string>>>}>  $tables
  * @param  list<string>  $acf_fields  identifiers `acf_get_field()` knows (or all of them, with `$acf_knows_everything`)
- * @return array{dir: string, queries: ArrayObject<int, mixed>, out_dir_args: ArrayObject<int, mixed>}
+ * @return array{dir: string, queries: ArrayObject<int, array{string, string}|string>}
  */
 function cmd_archive(array $defs, array $tables, array $acf_fields = [], bool $acf_knows_everything = false): array
 {
     $dir = sys_get_temp_dir().'/acfcdt-command-test-'.bin2hex(random_bytes(4));
     mkdir($dir);
-    $GLOBALS['cmd_dirs'][] = $dir;
+    CommandTestState::$dirs[] = $dir;
 
     $queries = new ArrayObject;
-    $out_dir_args = new ArrayObject;
 
-    redefine(Site::class.'::out_dir', function ($override = null, $sub = '') use ($dir, $out_dir_args): string {
-        $out_dir_args[] = [$override, $sub];
+    redefine(Site::class.'::out_dir', function (?string $override = null, string $sub = '') use ($dir): string {
+        CommandTestState::$out_dir_args[] = [$override, $sub];
 
         return $dir;
     });
@@ -1072,7 +1136,27 @@ function cmd_archive(array $defs, array $tables, array $acf_fields = [], bool $a
     });
     $GLOBALS['wpdb'] = $wpdb;
 
-    return ['dir' => $dir, 'queries' => $queries, 'out_dir_args' => $out_dir_args];
+    return ['dir' => $dir, 'queries' => $queries];
+}
+
+/**
+ * The manifest `archive()` wrote into `$dir`.
+ *
+ * @return array<mixed>
+ */
+function cmd_manifest(string $dir): array
+{
+    return Cast::arr(json_decode((string) file_get_contents("$dir/site-7-manifest.json"), true));
+}
+
+/**
+ * The per-table entries of that manifest.
+ *
+ * @return list<array<mixed>>
+ */
+function cmd_manifest_tables(string $dir): array
+{
+    return array_map(Cast::arr(...), array_values(Cast::arr(cmd_manifest($dir)['tables'] ?? [])));
 }
 
 /**
@@ -1131,10 +1215,10 @@ it('archives a table to JSON lines, its orphaned columns to CSV, and a manifest'
     $dir = $env['dir'];
     $jsonl = "$dir/site-7-wp_provider.jsonl";
     $csv = "$dir/site-7-wp_provider-orphan-columns.csv";
-    $manifest = json_decode((string) file_get_contents("$dir/site-7-manifest.json"), true);
+    $manifest = cmd_manifest($dir);
 
     expect(cmd_closes())->toBe(2)
-        ->and($env['out_dir_args']->getArrayCopy())->toBe([['/base', 'archive/clean-run1']])
+        ->and(CommandTestState::$out_dir_args)->toBe([['/base', 'archive/clean-run1']])
         ->and(file_get_contents($jsonl))->toBe(
             '{"id":"1","post_id":"10","col_a":"x"}'."\n".'{"id":"2","post_id":"11","col_a":"caf'."\u{e9}".'/"}'."\n"
         )
@@ -1143,7 +1227,7 @@ it('archives a table to JSON lines, its orphaned columns to CSV, and a manifest'
         ->and($manifest['blog_id'])->toBe(7)
         ->and($manifest['url'])->toBe('https://example.test/')
         ->and($manifest['time'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/')
-        ->and($manifest['tables'])->toBe([[
+        ->and(cmd_manifest_tables($dir))->toBe([[
             'table' => 'wp_provider',
             'rows' => 2,
             'file' => 'site-7-wp_provider.jsonl',
@@ -1192,9 +1276,7 @@ it('pages a table with an id by the last id it read', function (): void {
 
     (new Command)->archive([], ['stamp' => 's']);
 
-    $manifest = json_decode((string) file_get_contents($env['dir'].'/site-7-manifest.json'), true);
-
-    expect($manifest['tables'][0]['rows'])->toBe(501)
+    expect(cmd_manifest_tables($env['dir'])[0]['rows'])->toBe(501)
         ->and(file($env['dir'].'/site-7-wp_provider.jsonl'))->toHaveCount(501);
 });
 
@@ -1286,10 +1368,8 @@ it('lists every archived table in the manifest and the dump command', function (
 
     (new Command)->archive([], ['stamp' => 's']);
 
-    $manifest = json_decode((string) file_get_contents($env['dir'].'/site-7-manifest.json'), true);
-
-    expect(array_column($manifest['tables'], 'table'))->toBe(['wp_provider', 'wp_location'])
-        ->and(array_column($manifest['tables'], 'rows'))->toBe([1, 0])
+    expect(array_column(cmd_manifest_tables($env['dir']), 'table'))->toBe(['wp_provider', 'wp_location'])
+        ->and(array_column(cmd_manifest_tables($env['dir']), 'rows'))->toBe([1, 0])
         ->and(cmd_calls('log'))->toContain('   Also take a SQL dump of these tables: wp db export --tables=wp_provider,wp_location acfcdt-site-7.sql');
 });
 
@@ -1298,19 +1378,17 @@ it('writes an empty manifest and no dump command when no table is active', funct
 
     (new Command)->archive([], ['stamp' => 's']);
 
-    $manifest = json_decode((string) file_get_contents($env['dir'].'/site-7-manifest.json'), true);
-
-    expect($manifest['tables'])->toBe([])
+    expect(cmd_manifest_tables($env['dir']))->toBe([])
         ->and(CommandTestCli::$calls)->toBe([...cmd_header(), ['success', 'Archived site 7.']]);
 });
 
 it('names the archive folder by the time when no stamp is given', function (): void {
-    $env = cmd_archive([], []);
+    cmd_archive([], []);
 
     (new Command)->archive([], []);
 
-    expect($env['out_dir_args'][0][0])->toBeNull()
-        ->and($env['out_dir_args'][0][1])->toMatch('/^archive\/clean-\d{8}-\d{6}$/');
+    expect(CommandTestState::$out_dir_args[0][0])->toBeNull()
+        ->and(CommandTestState::$out_dir_args[0][1])->toMatch('/^archive\/clean-\d{8}-\d{6}$/');
 });
 
 it('shares one stamp with the child processes of a network archive', function (): void {
@@ -1320,8 +1398,8 @@ it('shares one stamp with the child processes of a network archive', function ()
 
     (new Command)->archive([], ['network' => true]);
 
-    expect($seen[0][0])->toBe('acfcdt-migrate archive')
-        ->and($seen[0][2]['stamp'])->toMatch('/^\d{8}-\d{6}$/');
+    expect(cmd_seen($seen, 0)[0])->toBe('acfcdt-migrate archive')
+        ->and(Cast::arr(cmd_seen($seen, 0)[2])['stamp'])->toMatch('/^\d{8}-\d{6}$/');
 });
 
 it('hands the json-dir override to the Site it archives', function (): void {
@@ -1346,8 +1424,8 @@ it('hands every data subcommand to the child processes under --network, and does
     (new Command)->{$sub}($args, ['network' => true]);
 
     expect($seen->count())->toBe(1)
-        ->and($seen[0][0])->toBe('acfcdt-migrate '.$sub)
-        ->and($seen[0][1])->toBe($args)
+        ->and(cmd_seen($seen, 0)[0])->toBe('acfcdt-migrate '.$sub)
+        ->and(cmd_seen($seen, 0)[1])->toBe($args)
         ->and(cmd_calls('success'))->toBe(["Network $sub finished on 1 site(s)."]);
 })->with([
     'inventory' => ['inventory', []],
@@ -1357,3 +1435,38 @@ it('hands every data subcommand to the child processes under --network, and does
     'rollback' => ['rollback', ['run-1']],
     'status' => ['status', []],
 ]);
+
+it('lists a rollback with no status as a bare rollback label', function (): void {
+    cmd_store([
+        'headers' => fn ($kind): array => match ($kind) {
+            'snapinfo' => [],
+            'rollback' => ['run-b' => ['created' => '2026-01-04']],
+            'run' => ['run-b' => ['stats' => ['fields' => 9, 'write_mismatch' => 2], 'created' => '2026-01-04']],
+            default => throw new LogicException("Unexpected header kind: $kind"),
+        },
+    ]);
+
+    (new Command)->status([], []);
+
+    expect(CommandTestState::$tables)->toBe([[
+        'table',
+        [['type' => 'backfill', 'name' => 'run-b', 'detail' => '9 fields, 2 mismatches, rollback ', 'status' => '', 'when' => '2026-01-04']],
+        ['type', 'name', 'detail', 'status', 'when'],
+    ]]);
+});
+
+it('launches the child with an empty script argument when there is no argv', function (): void {
+    cmd_network([[1, 'a.test', '/', ['provider']]]);
+    cmd_process(fopen('php://memory', 'r'));
+    $argv = $GLOBALS['argv'] ?? null;
+    $GLOBALS['argv'] = [];
+    CommandTestCli::$runner = (object) ['config' => ['path' => '/var/www', 'user' => 'admin', 'allow-root' => true]];
+
+    (new Command)->status([], ['network' => true]);
+
+    $GLOBALS['argv'] = $argv;
+
+    $opened = cmd_process_call('open');
+    expect($opened)->not->toBeNull()
+        ->and(Cast::str(Cast::arr($opened)[1]))->toContain(escapeshellarg('/usr/bin/php').' '.escapeshellarg('').' acfcdt-migrate status');
+});

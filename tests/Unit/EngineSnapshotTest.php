@@ -23,6 +23,7 @@
 declare(strict_types=1);
 
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\HookGuard;
 use UAMSWP_ACFCDT_Migrator\Site;
@@ -38,7 +39,7 @@ beforeEach(function (): void {
 
     when('get_current_blog_id')->justReturn(5);
     when('home_url')->alias(fn (string $path = ''): string => 'https://example.test'.$path);
-    when('absint')->alias(fn (mixed $n): int => abs((int) $n));
+    when('absint')->alias(fn (mixed $n): int => abs((int) Cast::str($n)));
     when('wp_json_encode')->alias(fn (mixed $v, int $flags = 0): string|false => json_encode($v, $flags));
     redefine(Store::class.'::install', function (): void {});
 });
@@ -48,6 +49,13 @@ afterEach(function (): void {
     unset($GLOBALS['wpdb']);
 });
 
+/** The shared record of the calls the stand-ins received, in order. */
+final class EngSnapLog
+{
+    /** @var list<array<mixed>> */
+    public array $log = [];
+}
+
 /**
  * Redefines `Store` and `HookGuard`, and returns the shared record of what was called.
  *
@@ -56,22 +64,18 @@ afterEach(function (): void {
  * true by default). The log holds `[name, ...arguments]` rows in call order.
  *
  * @param  array<string, mixed>  $answers
- * @return ArrayObject<string, list<mixed>>
  */
-function eng_snap_wire(array $answers = []): ArrayObject
+function eng_snap_wire(array $answers = []): EngSnapLog
 {
-    /** @var ArrayObject<string, list<mixed>> $st */
-    $st = new ArrayObject(['log' => []]);
+    $st = new EngSnapLog;
     $note = function (string $name, array $args) use ($st): void {
-        $log = $st['log'];
-        $log[] = [$name, ...$args];
-        $st->offsetSet('log', $log);
+        $st->log[] = [$name, ...$args];
     };
 
     redefine(Store::class.'::get', function (...$args) use ($note, $answers): mixed {
         $note('get', $args);
 
-        return $answers['get'][$args[0].'|'.$args[1]] ?? null;
+        return Cast::arr($answers['get'] ?? [])[Cast::str($args[0]).'|'.Cast::str($args[1])] ?? null;
     });
     redefine(Store::class.'::put', function (...$args) use ($note): void {
         $note('put', [...$args, 'argc='.count($args)]);
@@ -82,12 +86,12 @@ function eng_snap_wire(array $answers = []): ArrayObject
     redefine(Store::class.'::count', function (...$args) use ($note, $answers): int {
         $note('count', $args);
 
-        return $answers['count'] ?? 0;
+        return Cast::int($answers['count'] ?? 0);
     });
     redefine(Store::class.'::by_post', function (...$args) use ($note, $answers): array {
         $note('by_post', $args);
 
-        return $answers['by_post'][$args[1]] ?? [];
+        return Cast::arr(Cast::arr($answers['by_post'] ?? [])[Cast::str($args[1])] ?? []);
     });
     redefine(HookGuard::class.'::__construct', function () use ($note): void {
         $note('guard.new', []);
@@ -95,7 +99,7 @@ function eng_snap_wire(array $answers = []): ArrayObject
     redefine(HookGuard::class.'::has_intercepts', function () use ($note, $answers): bool {
         $note('guard.has_intercepts', []);
 
-        return $answers['intercepts'] ?? true;
+        return (bool) ($answers['intercepts'] ?? true);
     });
     redefine(HookGuard::class.'::detach', function () use ($note): void {
         $note('guard.detach', []);
@@ -113,24 +117,32 @@ function eng_snap_wire(array $answers = []): ArrayObject
 /**
  * The logged calls, one row per call, filtered to the given names.
  *
- * @param  ArrayObject<string, list<mixed>>  $st
  * @param  list<string>  $names
- * @return list<array<int, mixed>>
+ * @return list<array<mixed>>
  */
-function eng_snap_calls(ArrayObject $st, array $names): array
+function eng_snap_calls(EngSnapLog $st, array $names): array
 {
-    return array_values(array_filter($st['log'] ?? [], fn (array $row): bool => in_array($row[0], $names, true)));
+    return array_values(array_filter($st->log, fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
 /**
  * The names of every logged call, in order.
  *
- * @param  ArrayObject<string, list<mixed>>  $st
  * @return list<string>
  */
-function eng_snap_order(ArrayObject $st): array
+function eng_snap_order(EngSnapLog $st): array
 {
-    return array_map(fn (array $row): string => $row[0], $st['log'] ?? []);
+    return array_map(fn (array $row): string => Cast::str($row[0]), $st->log);
+}
+
+/**
+ * A recorded list the `$wpdb` stand-in keeps in a global: `eng_snap_prepared` or `eng_snap_executed`.
+ *
+ * @return list<mixed>
+ */
+function eng_snap_global(string $name): array
+{
+    return array_values(Cast::arr($GLOBALS[$name] ?? []));
 }
 
 /**
@@ -146,13 +158,13 @@ function eng_snap_wpdb(array $rows): MockInterface
     $wpdb = Mockery::mock('wpdb');
     $wpdb->posts = 'wpx_posts';
     $wpdb->shouldReceive('prepare')->andReturnUsing(function (string $query, ...$args): string {
-        $GLOBALS['eng_snap_prepared'][] = [$query, $args];
+        $GLOBALS['eng_snap_prepared'] = [...eng_snap_global('eng_snap_prepared'), [$query, $args]];
 
         return 'P:'.$query;
     });
     $wpdb->shouldReceive('get_results')->andReturnUsing(function (string $sql) use ($rows): array {
-        $GLOBALS['eng_snap_executed'][] = $sql;
-        if (count($GLOBALS['eng_snap_executed']) > 5) {
+        $GLOBALS['eng_snap_executed'] = [...eng_snap_global('eng_snap_executed'), $sql];
+        if (count(eng_snap_global('eng_snap_executed')) > 5) {
             throw new LogicException('Runaway loop: more than 5 statements executed.');
         }
 
@@ -190,6 +202,15 @@ function eng_snap_dash(): string
     return "\u{2014}";
 }
 
+/**
+ * Calls `snapshot_start()` with the mode exactly as given, whatever its type (the engine compares it strictly, and one
+ * dataset hands it values that are not strings).
+ */
+function eng_snap_start(string $label, mixed $mode): string
+{
+    return Cast::str((new ReflectionMethod(Engine::class, 'snapshot_start'))->invoke(eng_snap_engine(), $label, $mode));
+}
+
 // snapshot_start()
 
 it('rejects a label with other characters before touching the store', function (): void {
@@ -197,7 +218,7 @@ it('rejects a label with other characters before touching the store', function (
 
     expect(fn (): string => eng_snap_engine()->snapshot_start('a b', 'effective'))
         ->toThrow(InvalidArgumentException::class, "Names may only contain letters, numbers, dot, dash and underscore (max 60): 'a b'")
-        ->and($st['log'])->toBe([]);
+        ->and($st->log)->toBe([]);
 });
 
 it('accepts each snapshot mode', function (string $mode): void {
@@ -209,9 +230,9 @@ it('accepts each snapshot mode', function (string $mode): void {
 it('rejects any other mode, compared strictly', function (mixed $mode): void {
     $st = eng_snap_wire();
 
-    expect(fn (): string => eng_snap_engine()->snapshot_start('before', $mode))
+    expect(fn (): string => eng_snap_start('before', $mode))
         ->toThrow(InvalidArgumentException::class, 'Mode must be effective or meta.')
-        ->and($st['log'])->toBe([]);
+        ->and($st->log)->toBe([]);
 })->with([
     'unknown' => ['both'],
     'wrong case' => ['Effective'],
@@ -283,7 +304,7 @@ it('stores a running record with the site details', function (): void {
         ->and($put[0][6])->toBe('argc=5')
         ->and($seen['args'])->toBe([['doctor', 'clinic'], null]);
 
-    $data = $put[0][5];
+    $data = Cast::arr($put[0][5]);
     expect(array_keys($data))->toBe(['mode', 'post_types', 'total', 'status', 'started', 'url', 'cache_problems'])
         ->and($data['mode'])->toBe('effective')
         ->and($data['post_types'])->toBe(['doctor', 'clinic'])
@@ -292,8 +313,8 @@ it('stores a running record with the site details', function (): void {
         ->and($data['url'])->toBe('https://example.test/')
         ->and($data['cache_problems'])->toBe(['object cache is external'])
         ->and($data['started'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/')
-        ->and(strtotime($data['started']))->toBeGreaterThanOrEqual($before)
-        ->and(strtotime($data['started']))->toBeLessThanOrEqual(time());
+        ->and(strtotime(Cast::str($data['started'])))->toBeGreaterThanOrEqual($before)
+        ->and(strtotime(Cast::str($data['started'])))->toBeLessThanOrEqual(time());
 });
 
 it('records the mode asked for only while the caching plugin is hooked in', function (bool $intercepts, string $mode, string $expected): void {
@@ -301,7 +322,7 @@ it('records the mode asked for only while the caching plugin is hooked in', func
 
     eng_snap_engine(['posts' => fn (): array => []])->snapshot_start('before', $mode);
 
-    expect(eng_snap_calls($st, ['put'])[0][5]['mode'])->toBe($expected);
+    expect(Cast::arr(eng_snap_calls($st, ['put'])[0][5])['mode'])->toBe($expected);
 })->with([
     'hooked, effective' => [true, 'effective', 'effective'],
     'hooked, meta' => [true, 'meta', 'meta'],
@@ -327,11 +348,12 @@ function eng_snap_fields(): array
 /**
  * Runs `snapshot_batch()` with `fields_for_post()` and `acf_get_value()` answered from the given maps.
  *
- * @param  array<int, mixed>  $values  post id => (field name => raw value)
+ * @param  array<int, array<string, mixed>>  $values  post id => (field name => raw value)
+ * @param  array<int, int|string>|null  $ids
  * @param  ArrayObject<int, mixed>  $calls  receives the call records: fields_for_post and acf_get_value
  * @return array<string, mixed>
  */
-function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, string $label = 'before', mixed $cursor = 0, int $limit = 25, mixed $ids = null): array
+function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, string $label = 'before', int|string $cursor = 0, int $limit = 25, ?array $ids = null): array
 {
     redefine(Site::class.'::fields_for_post', function (mixed $id, mixed $type) use ($calls): array {
         $calls[] = ['fields_for_post', $id, $type];
@@ -339,9 +361,9 @@ function eng_snap_batch(Engine $engine, ArrayObject $calls, array $values, strin
         return eng_snap_fields();
     });
     when('acf_get_value')->alias(function (mixed $id, array $field) use ($calls, $values): mixed {
-        $calls[] = ['acf_get_value', $id, $field['key']];
+        $calls[] = ['acf_get_value', $id, Cast::str($field['key'])];
 
-        return $values[$id][$field['key']] ?? null;
+        return $values[Cast::int($id)][Cast::str($field['key'])] ?? null;
     });
 
     return $engine->snapshot_batch($label, $cursor, $limit, $ids);
@@ -386,7 +408,7 @@ it('stores each post with its normalized fields and reports the batch', function
         ])
         ->and($snapshots[0][6])->toBe('argc=5')
         ->and(array_slice($snapshots[1], 0, 5))->toBe(['put', 'snapshot', 'before', 9, ''])
-        ->and($snapshots[1][5]['fields'])->toBe(['bio' => ['t' => 'textarea', 'v' => 'Nine bio']]);
+        ->and(Cast::arr($snapshots[1][5])['fields'])->toBe(['bio' => ['t' => 'textarea', 'v' => 'Nine bio']]);
 });
 
 it('stores a post with no values as an empty field list', function (): void {
@@ -396,7 +418,7 @@ it('stores a post with no values as an empty field list', function (): void {
     $result = eng_snap_batch(eng_snap_engine(), new ArrayObject, []);
 
     expect($result)->toBe(['processed' => 1, 'cursor' => 3, 'done' => true, 'values' => 0])
-        ->and(eng_snap_calls($st, ['put'])[0][5]['fields'])->toBe([]);
+        ->and(Cast::arr(eng_snap_calls($st, ['put'])[0][5])['fields'])->toBe([]);
 });
 
 it('numbers the post ids it stores as integers whatever the database returned', function (): void {
@@ -407,7 +429,7 @@ it('numbers the post ids it stores as integers whatever the database returned', 
 
     $put = eng_snap_calls($st, ['put'])[0];
     expect($put[3])->toBeInt()->toBe(12)
-        ->and($put[5]['post_id'])->toBeInt()->toBe(12);
+        ->and(Cast::arr($put[5])['post_id'])->toBeInt()->toBe(12);
 });
 
 it('asks the database for posts after the cursor, a page at a time', function (): void {
@@ -416,9 +438,9 @@ it('asks the database for posts after the cursor, a page at a time', function ()
 
     eng_snap_batch(eng_snap_engine(['post_types' => fn (): array => ['doctor', 'clinic']]), new ArrayObject, [], 'before', '41', 10, [3, '4']);
 
-    expect($GLOBALS['eng_snap_prepared'])->toHaveCount(1)
-        ->and($GLOBALS['eng_snap_prepared'][0][1])->toBe([['doctor', 'clinic', 41]])
-        ->and($GLOBALS['eng_snap_executed'][0])->toEndWith(' AND ID IN (3,4) ORDER BY ID ASC LIMIT 10');
+    expect(eng_snap_global('eng_snap_prepared'))->toHaveCount(1)
+        ->and(Cast::arr(eng_snap_global('eng_snap_prepared')[0])[1])->toBe([['doctor', 'clinic', 41]])
+        ->and(eng_snap_global('eng_snap_executed')[0])->toEndWith(' AND ID IN (3,4) ORDER BY ID ASC LIMIT 10');
 });
 
 it('defaults to a page of 25 posts and does not restrict the ids', function (): void {
@@ -428,8 +450,8 @@ it('defaults to a page of 25 posts and does not restrict the ids', function (): 
 
     $engine->snapshot_batch('before', 0);
 
-    expect($GLOBALS['eng_snap_executed'][0])->toEndWith(' ORDER BY ID ASC LIMIT 25')
-        ->and($GLOBALS['eng_snap_executed'][0])->not->toContain('ID IN (')
+    expect(eng_snap_global('eng_snap_executed')[0])->toEndWith(' ORDER BY ID ASC LIMIT 25')
+        ->and(eng_snap_global('eng_snap_executed')[0])->not->toContain('ID IN (')
         ->and(eng_snap_calls($st, ['put'])[0][1])->toBe('snapinfo');
 });
 
@@ -490,15 +512,15 @@ it('completes the snapshot when the page is short, counting its rows', function 
 
     $puts = eng_snap_calls($st, ['put']);
     $final = $puts[count($puts) - 1];
-    $info = $final[5];
+    $info = Cast::arr($final[5]);
     expect(array_slice($final, 0, 5))->toBe(['put', 'snapinfo', 'before', 0, ''])
         ->and(array_keys($info))->toBe(['mode', 'status', 'total', 'cursor', 'finished', 'posts'])
         ->and($info['status'])->toBe('complete')
         ->and($info['cursor'])->toBe(6)
         ->and($info['posts'])->toBe(8)
         ->and($info['finished'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/')
-        ->and(strtotime($info['finished']))->toBeGreaterThanOrEqual($before)
-        ->and(strtotime($info['finished']))->toBeLessThanOrEqual(time());
+        ->and(strtotime(Cast::str($info['finished'])))->toBeGreaterThanOrEqual($before)
+        ->and(strtotime(Cast::str($info['finished'])))->toBeLessThanOrEqual(time());
 });
 
 it('completes with the cursor it was given when there are no more posts', function (): void {
@@ -508,7 +530,7 @@ it('completes with the cursor it was given when there are no more posts', functi
     $result = eng_snap_batch(eng_snap_engine(), new ArrayObject, [], 'before', 40, 25);
 
     expect($result)->toBe(['processed' => 0, 'cursor' => 40, 'done' => true, 'values' => 0])
-        ->and(eng_snap_calls($st, ['put'])[0][5]['cursor'])->toBe(40);
+        ->and(Cast::arr(eng_snap_calls($st, ['put'])[0][5])['cursor'])->toBe(40);
 });
 
 it('reads a page that is exactly the limit as not done', function (int $limit, bool $done): void {
@@ -554,9 +576,8 @@ function eng_snap_rec(string $title, array $fields): array
  * @param  array<int, array<string, mixed>>  $b
  * @param  array<string, mixed>  $info_a
  * @param  array<string, mixed>  $info_b
- * @return ArrayObject<string, list<mixed>>
  */
-function eng_snap_two(array $a, array $b, array $info_a = ['status' => 'complete'], array $info_b = ['status' => 'complete']): ArrayObject
+function eng_snap_two(array $a, array $b, array $info_a = ['status' => 'complete'], array $info_b = ['status' => 'complete']): EngSnapLog
 {
     return eng_snap_wire([
         'get' => ['snapinfo|a' => $info_a, 'snapinfo|b' => $info_b],
@@ -570,10 +591,10 @@ it('cleans both names and reads each snapshot in order', function (): void {
     eng_snap_engine()->compare('a', 'b');
 
     expect(eng_snap_order($st))->toBe(['get', 'get', 'by_post', 'by_post'])
-        ->and(($st['log'] ?? [])[0])->toBe(['get', 'snapinfo', 'a'])
-        ->and(($st['log'] ?? [])[1])->toBe(['get', 'snapinfo', 'b'])
-        ->and(($st['log'] ?? [])[2])->toBe(['by_post', 'snapshot', 'a'])
-        ->and(($st['log'] ?? [])[3])->toBe(['by_post', 'snapshot', 'b']);
+        ->and(($st->log)[0])->toBe(['get', 'snapinfo', 'a'])
+        ->and(($st->log)[1])->toBe(['get', 'snapinfo', 'b'])
+        ->and(($st->log)[2])->toBe(['by_post', 'snapshot', 'a'])
+        ->and(($st->log)[3])->toBe(['by_post', 'snapshot', 'b']);
 });
 
 it('rejects a snapshot name with other characters before reading anything', function (string $a, string $b, string $shown): void {
@@ -581,7 +602,7 @@ it('rejects a snapshot name with other characters before reading anything', func
 
     expect(fn (): array => eng_snap_engine()->compare($a, $b))
         ->toThrow(InvalidArgumentException::class, "(max 60): '$shown'")
-        ->and($st['log'])->toBe([]);
+        ->and($st->log)->toBe([]);
 })->with([
     'the first' => ['a b', 'b', 'a b'],
     'the second' => ['a', 'b/', 'b/'],
@@ -714,4 +735,35 @@ it('treats values that normalize to the same text as equal, and a missing field 
     $result = eng_snap_engine()->compare('a', 'b');
 
     expect(array_column($result['diffs'], 'field'))->toBe(['n']);
+});
+
+it('titles a whole-post difference with an empty string when the record has no title', function (): void {
+    eng_snap_two(
+        [1 => ['fields' => ['name' => ['t' => 'text', 'v' => 'x']]]],
+        [],
+    );
+
+    expect(eng_snap_engine()->compare('a', 'b')['diffs'])->toBe([
+        ['post_id' => 1, 'title' => '', 'field' => '(whole post)', 'a' => 'present', 'b' => null],
+    ]);
+});
+
+it('titles a field difference with an empty string when the record has no title', function (): void {
+    eng_snap_two(
+        [5 => ['fields' => ['bio' => ['t' => 'text', 'v' => 'old']]]],
+        [5 => ['fields' => ['bio' => ['t' => 'text', 'v' => 'new']]]],
+    );
+
+    expect(eng_snap_engine()->compare('a', 'b')['diffs'])->toBe([
+        ['post_id' => 5, 'title' => '', 'field' => 'bio', 'a' => 'old', 'b' => 'new'],
+    ]);
+});
+
+it('does not detach the caching plugin for a snapshot record with no mode', function (): void {
+    $st = eng_snap_wire(['get' => ['snapinfo|before' => ['status' => 'running']], 'intercepts' => true]);
+    eng_snap_wpdb([]);
+
+    eng_snap_engine()->snapshot_batch('before', 0);
+
+    expect(eng_snap_calls($st, ['guard.detach']))->toBe([]);
 });

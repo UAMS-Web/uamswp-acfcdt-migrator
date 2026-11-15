@@ -15,6 +15,22 @@ namespace UAMSWP_ACFCDT_Migrator;
  *  change     <stamp>        post     field name   what differed / was written        (REPLACE)
  *  backup     <stamp>        post     field name   postmeta rows BEFORE the write     (INSERT IGNORE — first write wins)
  *  rollback   <stamp>        0        ''           rollback header
+ *
+ * Shapes of what the rows hold, for the callers that read them back:
+ *
+ * @phpstan-type NormalizedValue array<mixed>|string
+ * @phpstan-type SnapInfo array{mode?: string, post_types?: list<string>, total?: int, status?: string, started?: string, url?: string, cache_problems?: list<string>, cursor?: int|string, finished?: string, posts?: int}
+ * @phpstan-type SnapInfoRow array{mode?: string, post_types?: list<string>, total?: int, status?: string, started?: string, url?: string, cache_problems?: list<string>, cursor?: int|string, finished?: string, posts?: int, created: string}
+ * @phpstan-type ChangeStats array{fields: int, fill: int, overwrite: int, clear: int, skipped: int, invalid: int, write_mismatch: int, posts: int}
+ * @phpstan-type ByFieldRow array{field: string, fill: int, overwrite: int, clear: int}
+ * @phpstan-type ChangeSummary array{stats: ChangeStats, by_field: list<ByFieldRow>}
+ * @phpstan-type RunHeader array{dry?: bool, no_clear?: bool, total?: int, status?: string, started?: string, url?: string, cursor?: int|string, finished?: string, stats?: ChangeStats, by_field?: list<ByFieldRow>}
+ * @phpstan-type RunHeaderRow array{dry?: bool, no_clear?: bool, total?: int, status?: string, started?: string, url?: string, cursor?: int|string, finished?: string, stats?: ChangeStats, by_field?: list<ByFieldRow>, created: string}
+ * @phpstan-type RollbackHeader array{status?: string, started?: string, total?: int, cursor?: int|string, finished?: string}
+ * @phpstan-type RollbackHeaderRow array{status?: string, started?: string, total?: int, cursor?: int|string, finished?: string, created: string}
+ * @phpstan-type SnapshotRecord array{post_id: int, post_type: string, post_status: string, post_title: string, fields: array<int|string, array{t: string, v: NormalizedValue}>}
+ * @phpstan-type ChangeRecord array{post_id: int, post_type: string, title: string, modified: string, field: int|string, key: string, type: string, category: 'fill'|'overwrite'|'clear', effective: NormalizedValue|null, meta_before: NormalizedValue|null, invalid?: bool, skipped?: bool, write_mismatch?: bool, meta_after?: NormalizedValue|null}
+ * @phpstan-type BackupRecord array{post_id: int, field: int|string, complex: bool, rows: array<int, array<int, string|null>>|null}
  */
 class Store
 {
@@ -30,7 +46,7 @@ class Store
     public static function install(): void
     {
         global $wpdb;
-        if ((int) get_site_option('uamswp_acfcdt_migrator_db', 0) >= self::DB_VERSION && self::exists()) {
+        if (Cast::int(get_site_option('uamswp_acfcdt_migrator_db', 0)) >= self::DB_VERSION && self::exists()) {
             return;
         }
 
@@ -111,6 +127,83 @@ class Store
     }
 
     /**
+     * The snapshot header of one label.
+     *
+     * @param  string  $ref  Snapshot label.
+     * @return SnapInfo|null `null` when no row matches; `[]` when the stored value is not an array.
+     */
+    public static function snapinfo($ref): ?array
+    {
+        $data = self::get('snapinfo', $ref);
+
+        if ($data === null) {
+            return null;
+        }
+
+        // Header rows are written only by `put()` from the arrays `Engine` builds, so a decoded array has this shape.
+        /** @var SnapInfo $header */
+        $header = self::shape($data);
+
+        return $header;
+    }
+
+    /**
+     * The header of one backfill run.
+     *
+     * @param  string  $stamp  Run name.
+     * @return RunHeader|null `null` when no row matches; `[]` when the stored value is not an array.
+     */
+    public static function run_header($stamp): ?array
+    {
+        $data = self::get('run', $stamp);
+
+        if ($data === null) {
+            return null;
+        }
+
+        // Header rows are written only by `put()` from the arrays `Engine` builds, so a decoded array has this shape.
+        /** @var RunHeader $header */
+        $header = self::shape($data);
+
+        return $header;
+    }
+
+    /**
+     * The header of one rollback.
+     *
+     * @param  string  $stamp  Run name the rollback belongs to.
+     * @return RollbackHeader|null `null` when no row matches; `[]` when the stored value is not an array.
+     */
+    public static function rollback_header($stamp): ?array
+    {
+        $data = self::get('rollback', $stamp);
+
+        if ($data === null) {
+            return null;
+        }
+
+        // Header rows are written only by `put()` from the arrays `Engine` builds, so a decoded array has this shape.
+        /** @var RollbackHeader $header */
+        $header = self::shape($data);
+
+        return $header;
+    }
+
+    /**
+     * The one place a decoded header enters typed code.
+     *
+     * Header rows are written only by `put()` from the arrays `Engine` builds, so a decoded array has the header shape
+     * of its kind. Anything that is not an array reads as `[]`, which every header shape allows.
+     *
+     * @param  mixed  $decoded  The result of `json_decode()` on the row's data.
+     * @return array<string, mixed>
+     */
+    private static function shape(mixed $decoded): array
+    {
+        return Cast::arr($decoded);
+    }
+
+    /**
      * Rows of one kind/ref, cursor-paged by id.
      *
      * @param  string  $kind
@@ -149,9 +242,11 @@ class Store
     /**
      * Every row of a kind/ref decoded, keyed by post_id (snapshots).
      *
+     * Rows are returned as decoded, so a caller reading a snapshot record narrows each one itself (see `SnapshotRecord`).
+     *
      * @param  string  $kind
      * @param  string  $ref
-     * @return mixed[]
+     * @return array<int, mixed>
      */
     public static function by_post($kind, $ref): array
     {
@@ -208,8 +303,11 @@ class Store
     /**
      * List refs of a header kind (snapinfo / run) with their header data.
      *
-     * @param  string  $kind
-     * @return array<string, non-empty-array<string, mixed>>
+     * Each header is the decoded data with the row's creation time under `created` (a `created` key the data holds
+     * itself wins). Data that does not decode to an array reads as an empty header.
+     *
+     * @param  string  $kind  `snapinfo`, `run` or `rollback`.
+     * @return ($kind is 'snapinfo' ? array<string, SnapInfoRow> : ($kind is 'run' ? array<string, RunHeaderRow> : ($kind is 'rollback' ? array<string, RollbackHeaderRow> : array<string, array<string, mixed>>)))
      */
     public static function headers($kind): array
     {
@@ -221,7 +319,7 @@ class Store
         ));
         $out = [];
         foreach ($rows as $r) {
-            $out[$r->ref] = (array) json_decode($r->data, true) + ['created' => $r->created];
+            $out[Cast::str($r->ref)] = self::shape(json_decode(Cast::str($r->data), true)) + ['created' => Cast::str($r->created)];
         }
 
         return $out;
@@ -231,7 +329,7 @@ class Store
      * Category counts for a backfill run, computed from change rows (accurate even if batches were retried).
      *
      * @param  string  $stamp
-     * @return array{stats: array<string, int>, by_field: list<array<string, int|string>>}
+     * @return ChangeSummary
      */
     public static function change_summary($stamp): array
     {
@@ -246,9 +344,14 @@ class Store
         $posts = [];
         $by = [];
         foreach ($rows as $json) {
-            $c = json_decode($json, true);
+            $c = Cast::arr(json_decode(Cast::str($json), true));
+            $category = Cast::str($c['category'] ?? null);
+            $known = in_array($category, ['fill', 'overwrite', 'clear'], true);
             $stats['fields']++;
-            $stats[$c['category']]++;
+            if ($known) {
+                $stats[$category]++;
+            }
+
             if (! empty($c['skipped'])) {
                 $stats['skipped']++;
             }
@@ -263,15 +366,16 @@ class Store
 
             // Only the keys are counted, so the value stored makes no difference.
             // @pest-mutate-ignore: TrueToFalse
-            $posts[$c['post_id']] = true;
-            $k = $c['post_type'].'.'.$c['field'];
+            $posts[Cast::int($c['post_id'] ?? 0)] = true;
+            $k = Cast::str($c['post_type'] ?? '').'.'.Cast::str($c['field'] ?? '');
             $by[$k] ??= ['field' => $k, 'fill' => 0, 'overwrite' => 0, 'clear' => 0];
 
-            $by[$k][$c['category']]++;
+            if ($known) {
+                $by[$k][$category]++;
+            }
         }
 
         $stats['posts'] = count($posts);
-        /** @var array<string, array<string, int|string>> $by */
         ksort($by);
 
         return ['stats' => $stats, 'by_field' => array_values($by)];
