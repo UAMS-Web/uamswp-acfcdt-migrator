@@ -125,7 +125,7 @@ Sandbox (separate DB, not your Local site): WP 7.0.6 subdirectory multisite, ACF
 
 ## Running the tests
 
-The unit suite uses Pest 5 with Brain Monkey, so it needs no database and no WordPress checkout. The plugin needs PHP 8.2 or later (`Requires PHP` in the plugin header, `require.php` in `composer.json`). The tests run on PHP 8.4 (`config.platform.php` in `composer.json`), and every shipped file must parse on PHP 8.2 (`php -l` on that version).
+The unit suite uses Pest 5 with Brain Monkey, so it needs no database and no WordPress checkout. The plugin needs WordPress 6.8 or later (`Requires at least` in the plugin header; its queries bind table names with the `%i` placeholder) and PHP 8.2 or later (`Requires PHP` in the plugin header, `require.php` in `composer.json`). The tests run on PHP 8.4 (`config.platform.php` in `composer.json`), and every shipped file must parse on PHP 8.2 (`php -l` on that version).
 
 ```bash
 composer install

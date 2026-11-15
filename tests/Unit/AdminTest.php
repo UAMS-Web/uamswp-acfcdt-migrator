@@ -264,7 +264,7 @@ function adm_ajax(array $post): AdminTestSent
 /**
  * Runs the download handler and returns what it printed, stopping where it would exit.
  *
- * @param  array<string, mixed>  $get
+ * @param  array<mixed>  $get
  */
 function adm_download(array $get): string
 {
@@ -309,8 +309,8 @@ function adm_headers(): array
 /**
  * An inventory with every key the site page reads.
  *
- * @param  array<string, mixed>  $over
- * @return array<string, mixed>
+ * @param  array<mixed>  $over
+ * @return array<mixed>
  */
 function adm_inventory(array $over = []): array
 {
@@ -352,17 +352,17 @@ function adm_table(array $over = []): array
 /**
  * Renders the site page with a given inventory and stored headers.
  *
- * @param  array<string, mixed>  $inv
- * @param  array<string, array<string, array<string, mixed>>>  $headers  Header rows by kind (snapinfo, run, rollback).
+ * @param  array<mixed>  $inv
+ * @param  array<string, array<mixed>>  $headers  Header rows by kind (snapinfo, run, rollback).
  */
 function adm_page(array $inv, array $headers = [], ?Closure $posts_upto = null): string
 {
     adm_engine([
         'inventory' => fn (): array => $inv,
-        'posts_upto' => $posts_upto ?? fn ($cursor): int => (int) $cursor * 10,
+        'posts_upto' => $posts_upto ?? fn ($cursor): int => Cast::int($cursor) * 10,
     ]);
     adm_store([
-        'headers' => fn ($kind): array => $headers[$kind] ?? [],
+        'headers' => fn ($kind): array => $headers[Cast::str($kind)] ?? [],
         'count' => fn ($kind, $ref, $where_sql = ''): int => 42,
         'change_summary' => fn ($stamp): array => [
             'stats' => ['fields' => 8, 'fill' => 5, 'overwrite' => 2, 'clear' => 1, 'skipped' => 0, 'invalid' => 0, 'write_mismatch' => 0, 'posts' => 3],
@@ -450,7 +450,7 @@ function adm_network(array $sites, array $tables, array $headers = []): string
 
         return array_fill_keys($names, ['name' => 'x']);
     });
-    adm_store(['headers' => fn ($kind): array => $headers[Cast::int($GLOBALS['adm_blog'] ?? 0)][$kind] ?? []]);
+    adm_store(['headers' => fn ($kind): array => $headers[Cast::int($GLOBALS['adm_blog'] ?? 0)][Cast::str($kind)] ?? []]);
 
     return adm_capture(fn () => Admin::network_page());
 }
@@ -854,7 +854,7 @@ it('looks the run and its rollback up before deleting a run', function (): void 
  * Sets what the Store holds for a run and its rollback and records what is deleted.
  *
  * @param  array<string, mixed>|null  $run
- * @param  array<string, mixed>|null  $rollback
+ * @param  array<mixed>|null  $rollback
  * @return ArrayObject<int, mixed>
  */
 function adm_delete_store(?array $run, ?array $rollback): ArrayObject
@@ -935,7 +935,7 @@ it('reports a failure of the layer below as an error with its message', function
 function adm_defs(array $defs): void
 {
     redefine(Site::class.'::active_defs', fn (): array => $defs);
-    redefine(Site::class.'::prefixed', fn ($table): string => 'wp_'.$table);
+    redefine(Site::class.'::prefixed', fn ($table): string => 'wp_'.Cast::str($table));
 }
 
 it('refuses a download to a user who may not use it, before checking the nonce', function (): void {
@@ -1093,7 +1093,7 @@ it('streams a stored snapshot, changes or backups page by page', function (strin
         return match ($after) {
             0 => array_map(fn (int $i): object => (object) ['id' => (string) $i, 'data' => '{"n":'.$i.'}'], range(1, 500)),
             500 => [(object) ['id' => '501', 'data' => '{"n":501}'], (object) ['id' => '507', 'data' => '{"n":507}']],
-            default => throw new LogicException("unexpected cursor $after"),
+            default => throw new LogicException('unexpected cursor '.Cast::str($after)),
         };
     }]);
 

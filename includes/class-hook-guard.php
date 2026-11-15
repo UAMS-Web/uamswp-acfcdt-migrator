@@ -39,6 +39,8 @@ class HookGuard
 
     private function collect(): void
     {
+        // Core fills `$wp_filter` with one `WP_Hook` per hook name and declares no type for it; the loop below skips any other value.
+        /** @var array<string, mixed> $wp_filter WordPress global declared by core. */
         global $wp_filter;
 
         foreach ($wp_filter as $hook => $wp_hook) {
@@ -47,7 +49,8 @@ class HookGuard
             }
 
             foreach ($wp_hook->callbacks as $priority => $cbs) {
-                foreach ($cbs as $cb) {
+                foreach (Cast::arr($cbs) as $cb) {
+                    $cb = Cast::arr($cb);
                     $fn = $cb['function'];
                     if (! is_array($fn) || ! is_object($fn[0]) || ! is_callable($fn)) {
                         continue;
@@ -58,7 +61,7 @@ class HookGuard
                         continue;
                     }
 
-                    $this->callbacks[] = [$hook, $fn, $priority, Cast::int($cb['accepted_args'])];
+                    $this->callbacks[] = [$hook, $fn, Cast::int($priority), Cast::int($cb['accepted_args'])];
 
                     if (str_ends_with($class, 'ACFGetFieldIntercept') && method_exists($fn[0], 'reset')) {
                         $this->get_intercepts[spl_object_hash($fn[0])] = $fn[0]->reset(...);

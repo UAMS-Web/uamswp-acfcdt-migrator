@@ -31,18 +31,20 @@ final class PluginStackTest extends IntegrationTestCase
 
     public function test_reads_a_post_back_from_the_database(): void
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         $postId = self::factory()->post->create(['post_title' => 'Read back from the test database']);
 
         $this->assertSame(
             'Read back from the test database',
-            $wpdb->get_var($wpdb->prepare("SELECT post_title FROM {$wpdb->posts} WHERE ID = %d", $postId))
+            $wpdb->get_var($wpdb->prepare('SELECT post_title FROM %i WHERE ID = %d', $wpdb->posts, $postId))
         );
     }
 
     public function test_the_store_asks_the_database_whether_its_table_exists(): void
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         $this->assertSame(

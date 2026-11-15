@@ -18,6 +18,7 @@ namespace UAMSWP_ACFCDT_Migrator;
  *
  * Shapes of what the rows hold, for the callers that read them back:
  *
+ * @phpstan-type StoreRow object{id: numeric-string, post_id: numeric-string, field: string, data: string}
  * @phpstan-type NormalizedValue array<mixed>|string
  * @phpstan-type SnapInfo array{mode?: string, post_types?: list<string>, total?: int, status?: string, started?: string, url?: string, cache_problems?: list<string>, cursor?: int|string, finished?: string, posts?: int}
  * @phpstan-type SnapInfoRow array{mode?: string, post_types?: list<string>, total?: int, status?: string, started?: string, url?: string, cache_problems?: list<string>, cursor?: int|string, finished?: string, posts?: int, created: string}
@@ -38,6 +39,7 @@ class Store
 
     public static function table(): string
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         return $wpdb->base_prefix.'acfcdt_migration';
@@ -45,6 +47,7 @@ class Store
 
     public static function install(): void
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         if (Cast::int(get_site_option('uamswp_acfcdt_migrator_db', 0)) >= self::DB_VERSION && self::exists()) {
             return;
@@ -71,6 +74,7 @@ class Store
 
     public static function exists(): bool
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $t = self::table();
 
@@ -88,12 +92,14 @@ class Store
      */
     public static function put($kind, $ref, $post_id, $field, $data, $mode = 'replace')
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $verb = $mode === 'ignore' ? 'INSERT IGNORE' : 'REPLACE';
         $json = Normalizer::json($data);
 
-        return $wpdb->query($wpdb->prepare(
-            "$verb INTO ".self::table().' (blog_id, kind, ref, post_id, field, data, created) VALUES (%d, %s, %s, %d, %s, %s, %s)',
+        return $wpdb->query(Cast::str($wpdb->prepare(
+            "$verb INTO %i (blog_id, kind, ref, post_id, field, data, created) VALUES (%d, %s, %s, %d, %s, %s, %s)",
+            self::table(),
             get_current_blog_id(),
             $kind,
             $ref,
@@ -101,7 +107,7 @@ class Store
             (string) $field,
             $json,
             current_time('mysql', true)
-        ));
+        )));
     }
 
     /**
@@ -113,9 +119,11 @@ class Store
      */
     public static function get($kind, $ref, $post_id = 0, $field = '')
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $json = $wpdb->get_var($wpdb->prepare(
-            'SELECT data FROM '.self::table().' WHERE blog_id = %d AND kind = %s AND ref = %s AND post_id = %d AND field = %s',
+            'SELECT data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s AND post_id = %d AND field = %s',
+            self::table(),
             get_current_blog_id(),
             $kind,
             $ref,
@@ -196,7 +204,7 @@ class Store
      * of its kind. Anything that is not an array reads as `[]`, which every header shape allows.
      *
      * @param  mixed  $decoded  The result of `json_decode()` on the row's data.
-     * @return array<string, mixed>
+     * @return array<mixed>
      */
     private static function shape(mixed $decoded): array
     {
@@ -211,12 +219,13 @@ class Store
      * @param  int  $after_id  Last row id already read; with `$desc`, `0` starts from the newest.
      * @param  int  $limit
      * @param  bool  $desc  Walk from the newest row down instead of the oldest up.
-     * @return array<int, \stdClass>
+     * @return array<int, StoreRow>
      *
      * @throws \RuntimeException When the query fails.
      */
     public static function rows($kind, $ref, $after_id = 0, $limit = 500, $desc = false)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $op = $desc ? '<' : '>';
         $order = $desc ? 'DESC' : 'ASC';
@@ -224,8 +233,10 @@ class Store
             $after_id = PHP_INT_MAX;
         }
 
+        /** @var array<int, StoreRow>|null $rows The stub types a row as `stdClass`, whose properties are `mixed`; the `SELECT` names these four columns, which `mysqli` returns as strings. */
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT id, post_id, field, data FROM '.self::table()." WHERE blog_id = %d AND kind = %s AND ref = %s AND id $op %d ORDER BY id $order LIMIT %d",
+            "SELECT id, post_id, field, data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s AND id $op %d ORDER BY id $order LIMIT %d",
+            self::table(),
             get_current_blog_id(),
             $kind,
             $ref,
@@ -268,14 +279,16 @@ class Store
     /**
      * @param  string  $kind
      * @param  string  $ref
-     * @param  string  $where_sql  Extra SQL appended to the `WHERE` clause, already prepared.
+     * @param  literal-string  $where_sql  Extra SQL appended to the `WHERE` clause; no caller passes one today, and it is not prepared, so it must be a fixed fragment.
      */
     public static function count($kind, $ref, $where_sql = ''): int
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         return (int) $wpdb->get_var($wpdb->prepare(
-            'SELECT COUNT(*) FROM '.self::table()." WHERE blog_id = %d AND kind = %s AND ref = %s $where_sql",
+            "SELECT COUNT(*) FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s $where_sql",
+            self::table(),
             get_current_blog_id(),
             $kind,
             $ref
@@ -289,15 +302,16 @@ class Store
      */
     public static function delete(array $kinds, $ref)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         // The first index array_fill() numbers from is discarded by implode().
         // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($kinds), '%s'));
 
-        return $wpdb->query($wpdb->prepare(
-            'DELETE FROM '.self::table()." WHERE blog_id = %d AND ref = %s AND kind IN ($in)",
-            array_merge([get_current_blog_id(), $ref], $kinds)
-        ));
+        return $wpdb->query(Cast::str($wpdb->prepare(
+            "DELETE FROM %i WHERE blog_id = %d AND ref = %s AND kind IN ($in)",
+            array_merge([self::table(), get_current_blog_id(), $ref], $kinds)
+        )));
     }
 
     /**
@@ -307,18 +321,20 @@ class Store
      * itself wins). Data that does not decode to an array reads as an empty header.
      *
      * @param  string  $kind  `snapinfo`, `run` or `rollback`.
-     * @return ($kind is 'snapinfo' ? array<string, SnapInfoRow> : ($kind is 'run' ? array<string, RunHeaderRow> : ($kind is 'rollback' ? array<string, RollbackHeaderRow> : array<string, array<string, mixed>>)))
+     * @return ($kind is 'snapinfo' ? array<string, SnapInfoRow> : ($kind is 'run' ? array<string, RunHeaderRow> : ($kind is 'rollback' ? array<string, RollbackHeaderRow> : array<string, array<mixed>>)))
      */
     public static function headers($kind): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT ref, data, created FROM '.self::table().' WHERE blog_id = %d AND kind = %s ORDER BY id DESC',
+            'SELECT ref, data, created FROM %i WHERE blog_id = %d AND kind = %s ORDER BY id DESC',
+            self::table(),
             get_current_blog_id(),
             $kind
         ));
         $out = [];
-        foreach ($rows as $r) {
+        foreach ($rows ?? [] as $r) {
             $out[Cast::str($r->ref)] = self::shape(json_decode(Cast::str($r->data), true)) + ['created' => Cast::str($r->created)];
         }
 
@@ -333,9 +349,11 @@ class Store
      */
     public static function change_summary($stamp): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $rows = $wpdb->get_col($wpdb->prepare(
-            'SELECT data FROM '.self::table().' WHERE blog_id = %d AND kind = %s AND ref = %s',
+            'SELECT data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s',
+            self::table(),
             get_current_blog_id(),
             'change',
             $stamp

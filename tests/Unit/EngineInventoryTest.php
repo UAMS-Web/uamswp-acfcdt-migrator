@@ -296,8 +296,8 @@ it('counts the posts at or below a cursor', function (): void {
 
     [$query, $args] = eng_inv_state()->prepared[0];
     expect($count)->toBe(7)
-        ->and(eng_inv_flat($query))->toBe("SELECT COUNT(*) FROM wpx_posts WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID <= %d")
-        ->and($args)->toBe([['doctor', 'clinic', 12]])
+        ->and(eng_inv_flat($query))->toBe("SELECT COUNT(*) FROM %i WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID <= %d")
+        ->and($args)->toBe([['wpx_posts', 'doctor', 'clinic', 12]])
         ->and(eng_inv_state()->executed[0][0])->toBe('get_var')
         ->and(eng_inv_state()->executed[0][1])->toBe('P:'.$query);
 });
@@ -340,8 +340,8 @@ it('pages posts above a cursor in ascending order', function (): void {
 
     [$query, $args] = eng_inv_state()->prepared[0];
     expect($rows)->toBe(['row'])
-        ->and(eng_inv_flat($query))->toBe("SELECT ID, post_type, post_status, post_title, post_modified FROM wpx_posts WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID > %d")
-        ->and($args)->toBe([['doctor', 'clinic', 9]])
+        ->and(eng_inv_flat($query))->toBe("SELECT ID, post_type, post_status, post_title, post_modified FROM %i WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit') AND ID > %d")
+        ->and($args)->toBe([['wpx_posts', 'doctor', 'clinic', 9]])
         ->and(eng_inv_log())->toBe([['get_results', 'P:'.eng_inv_flat($query).' ORDER BY ID ASC LIMIT 25']]);
 });
 
@@ -428,7 +428,7 @@ function eng_inv_wire(array $defs, array $existing, mixed $core_meta = true): En
         'cache_status' => fn (): array => ['ok' => true],
         'cache_problems' => fn (): array => ['problem'],
         'table_defs' => fn (): array => $defs,
-        'prefixed' => fn ($name): string => 'wpx_'.$name,
+        'prefixed' => fn ($name): string => 'wpx_'.Cast::str($name),
         'table_exists' => fn ($name): bool => in_array($name, $existing, true),
     ]);
 }
@@ -501,11 +501,11 @@ it('measures an existing table with one query per figure', function (): void {
     $log = eng_inv_log();
     expect($log[0])->toBe(['get_var', 'SELECT COUNT(*) FROM `wpx_doctors`'])
         ->and($log[1])->toBe(['get_var', 'SELECT COUNT(*) FROM `wpx_doctors` t LEFT JOIN wpx_posts p ON p.ID = t.post_id WHERE p.ID IS NULL'])
-        ->and($log[2])->toBe(['get_var', 'P:SELECT COUNT(*) FROM `wpx_doctors` t JOIN wpx_posts p ON p.ID = t.post_id WHERE p.post_type <> %s'])
-        ->and($log[3])->toBe(['get_var', "P:SELECT COUNT(*) FROM wpx_posts p LEFT JOIN `wpx_doctors` t ON t.post_id = p.ID WHERE p.post_type = %s AND p.post_status NOT IN ('auto-draft','inherit') AND t.post_id IS NULL"])
+        ->and($log[2])->toBe(['get_var', 'P:SELECT COUNT(*) FROM %i t JOIN %i p ON p.ID = t.post_id WHERE p.post_type <> %s'])
+        ->and($log[3])->toBe(['get_var', "P:SELECT COUNT(*) FROM %i p LEFT JOIN %i t ON t.post_id = p.ID WHERE p.post_type = %s AND p.post_status NOT IN ('auto-draft','inherit') AND t.post_id IS NULL"])
         ->and($log[4])->toBe(['get_col', 'SHOW COLUMNS FROM `wpx_doctors`'])
-        ->and(eng_inv_state()->prepared[0][1])->toBe(['doctor'])
-        ->and(eng_inv_state()->prepared[1][1])->toBe(['doctor']);
+        ->and(eng_inv_state()->prepared[0][1])->toBe(['wpx_doctors', 'wpx_posts', 'doctor'])
+        ->and(eng_inv_state()->prepared[1][1])->toBe(['wpx_posts', 'wpx_doctors', 'doctor']);
 });
 
 it('lists columns present in the database but not the definition, and the reverse', function (): void {
@@ -637,7 +637,7 @@ it('notes the field types the plugin does not support or encodes', function (str
 it('lists database columns with no ACF field, skipping the key columns', function (): void {
     eng_inv_wpdb(['get_col' => [['id', 'post_id', 'known', 'gone', 'unnamed', 'absent']]]);
     when('acf_get_field')->alias(fn (string $key): array|false => $key === 'field_gone' ? false : ['type' => 'text']);
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
     $def = ['name' => 't', 'post_type' => 'doctor', 'file' => 't.json', 'columns' => [
         ['name' => 'known', 'identifier' => 'field_known'],
         ['name' => 'gone', 'identifier' => 'field_gone'],
@@ -651,7 +651,7 @@ it('lists database columns with no ACF field, skipping the key columns', functio
 it('lists nothing when every column has a field', function (): void {
     eng_inv_wpdb(['get_col' => [['id', 'a']]]);
     eng_inv_state()->fields = ['field_a' => ['type' => 'text']];
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
 
     expect($engine->orphan_columns(['name' => 't', 'post_type' => 'doctor', 'file' => 't.json', 'columns' => [['name' => 'a', 'identifier' => 'field_a']]]))->toBe([]);
 });
@@ -685,7 +685,7 @@ function eng_inv_rows(int $from, int $to, bool $with_id = true): array
 
 it('streams every row of a table with an id, paging by id', function (): void {
     eng_inv_wpdb(['get_col' => [['id', 'v']], 'get_results' => [eng_inv_rows(1, 500), eng_inv_rows(501, 503)]]);
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
     $seen = [];
 
     $count = $engine->each_table_row('doctors', function (array $row) use (&$seen): void {
@@ -697,8 +697,8 @@ it('streams every row of a table with an id, paging by id', function (): void {
         ->and($seen[0])->toBe('1')
         ->and($seen[502])->toBe('503')
         ->and(eng_inv_state()->prepared)->toBe([
-            ['SELECT * FROM `wpx_doctors` WHERE id > %d ORDER BY id ASC LIMIT 500', [0]],
-            ['SELECT * FROM `wpx_doctors` WHERE id > %d ORDER BY id ASC LIMIT 500', [500]],
+            ['SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500', ['wpx_doctors', 0]],
+            ['SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500', ['wpx_doctors', 500]],
         ])
         ->and(eng_inv_state()->executed[1][0])->toBe('get_results')
         ->and(eng_inv_state()->executed[1][2])->toBe(['ARRAY_A'])
@@ -707,7 +707,7 @@ it('streams every row of a table with an id, paging by id', function (): void {
 
 it('pages a table with no id column by offset', function (): void {
     eng_inv_wpdb(['get_col' => [['v']], 'get_results' => [eng_inv_rows(1, 500, false), eng_inv_rows(501, 700, false)]]);
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
     $count = 0;
 
     $total = $engine->each_table_row('t', function (array $row) use (&$count): void {
@@ -726,7 +726,7 @@ it('pages a table with no id column by offset', function (): void {
 
 it('stops after a short page and after a full page followed by an empty one', function (int $first, int $queries, int $total): void {
     eng_inv_wpdb(['get_col' => [['id']], 'get_results' => [eng_inv_rows(1, $first), []]]);
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
 
     expect($engine->each_table_row('t', fn (array $row): null => null))->toBe($total)
         ->and(count(eng_inv_state()->executed) - 1)->toBe($queries);
@@ -739,7 +739,7 @@ it('stops after a short page and after a full page followed by an empty one', fu
 
 it('treats a column list without an exact id column as having none', function (): void {
     eng_inv_wpdb(['get_col' => [['ID', 'post_id']], 'get_results' => [eng_inv_rows(1, 2, false)]]);
-    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.$name]);
+    $engine = eng_inv_engine(['prefixed' => fn ($name): string => 'wpx_'.Cast::str($name)]);
 
     $engine->each_table_row('t', fn (array $row): null => null);
 

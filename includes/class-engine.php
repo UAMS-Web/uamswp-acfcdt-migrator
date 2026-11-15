@@ -10,6 +10,7 @@ namespace UAMSWP_ACFCDT_Migrator;
  *
  * @phpstan-import-type TableDef from Site
  * @phpstan-import-type CacheEntry from Site
+ * @phpstan-import-type PostRow from Site
  *
  * @phpstan-type TableColumn array{column: string, acf_name: string, acf_type: string, non_empty: int, note: string}
  * @phpstan-type TableMissing array{table: string, name: string, post_type: string, def_file: string, exists: false}
@@ -68,6 +69,7 @@ class Engine
      */
     public function posts_upto($cursor): int
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $types = $this->site->post_types();
         if (! $types || ! $cursor) {
@@ -79,8 +81,8 @@ class Engine
         $in = implode(',', array_fill(0, count($types), '%s'));
 
         return (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ($in) AND post_status NOT IN ('auto-draft','inherit') AND ID <= %d",
-            array_merge($types, [(int) $cursor])
+            "SELECT COUNT(*) FROM %i WHERE post_type IN ($in) AND post_status NOT IN ('auto-draft','inherit') AND ID <= %d",
+            array_merge([$wpdb->posts], $types, [(int) $cursor])
         ));
     }
 
@@ -90,12 +92,13 @@ class Engine
      * @param  int|string  $cursor
      * @param  int|string  $limit
      * @param  array<int, int|string>|null  $ids
-     * @return array<int, \stdClass>
+     * @return array<int, PostRow>
      *
      * @throws \RuntimeException When the query fails.
      */
     private function next_posts($cursor, $limit, $ids = null)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $types = $this->site->post_types();
         if (! $types) {
@@ -106,14 +109,15 @@ class Engine
         // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($types), '%s'));
         $sql = $wpdb->prepare(
-            "SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
+            "SELECT ID, post_type, post_status, post_title, post_modified FROM %i
 			 WHERE post_type IN ($in) AND post_status NOT IN ('auto-draft','inherit') AND ID > %d",
-            array_merge($types, [(int) $cursor])
+            array_merge([$wpdb->posts], $types, [(int) $cursor])
         );
         if ($ids) {
             $sql .= ' AND ID IN ('.implode(',', array_map(absint(...), $ids)).')';
         }
 
+        /** @var array<int, PostRow>|null $posts The stub types a row as `stdClass`, whose properties are `mixed`; the `SELECT` above names these five columns, which `mysqli` returns as strings. */
         $posts = $wpdb->get_results($sql.' ORDER BY ID ASC LIMIT '.max(1, (int) $limit));
         if ($posts === null) {
             throw new \RuntimeException('Cannot read the posts.');
@@ -135,6 +139,7 @@ class Engine
      */
     public function inventory(): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $guard = new HookGuard;
         $overview = [
@@ -162,15 +167,20 @@ class Engine
             $rows = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table`");
             $missing_post = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table` t LEFT JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.ID IS NULL");
             $wrong_type = (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM `$table` t JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.post_type <> %s",
+                'SELECT COUNT(*) FROM %i t JOIN %i p ON p.ID = t.post_id WHERE p.post_type <> %s',
+                $table,
+                $wpdb->posts,
                 $def['post_type']
             ));
             $no_row = (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN `$table` t ON t.post_id = p.ID
+                "SELECT COUNT(*) FROM %i p LEFT JOIN %i t ON t.post_id = p.ID
 				 WHERE p.post_type = %s AND p.post_status NOT IN ('auto-draft','inherit') AND t.post_id IS NULL",
+                $wpdb->posts,
+                $table,
                 $def['post_type']
             ));
 
+            /** @var list<string> $db_cols The column names, which `SHOW COLUMNS` returns as strings. */
             $db_cols = $wpdb->get_col("SHOW COLUMNS FROM `$table`");
             $def_cols = array_column($def['columns'], 'name');
             $extra_cols = Cast::strings(array_diff($db_cols, $def_cols));
@@ -192,7 +202,7 @@ class Engine
                     $note = 'ORPHAN: no ACF field by this name — archive only';
                 } elseif (! empty($field['parent']) && is_string($field['parent']) && str_starts_with($field['parent'], 'field_')) {
                     $parent = acf_get_field($field['parent']);
-                    $note = 'nested inside '.($parent ? $parent['type'].' "'.$parent['name'].'"' : $field['parent']).' — plugin likely never intercepted it';
+                    $note = 'nested inside '.($parent ? Cast::str($parent['type']).' "'.Cast::str($parent['name']).'"' : $field['parent']).' — plugin likely never intercepted it';
                 } elseif (in_array($field['type'], ['group', 'clone', 'flexible_content'], true)) {
                     $note = $field['type'].' — unsupported by plugin, values likely in postmeta';
                 } elseif ($field['type'] === 'repeater') {
@@ -236,11 +246,14 @@ class Engine
      */
     public function orphan_columns(array $def): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $table = $this->site->prefixed($def['name']);
         $def_cols = array_column($def['columns'], 'identifier', 'name');
         $orphans = [];
-        foreach ($wpdb->get_col("SHOW COLUMNS FROM `$table`") as $col) {
+        /** @var list<string> $db_cols The column names, which `SHOW COLUMNS` returns as strings. */
+        $db_cols = $wpdb->get_col("SHOW COLUMNS FROM `$table`");
+        foreach ($db_cols as $col) {
             if (in_array($col, ['id', 'post_id'], true)) {
                 continue;
             }
@@ -258,11 +271,12 @@ class Engine
      * Stream every raw row of a custom table to a callback (archive). Read-only.
      *
      * @param  string  $table_name
-     * @param  callable  $emit  function( array $row )
+     * @param  callable(array<string, string|null>): mixed  $emit  Receives each row keyed by column name.
      * @return int rows
      */
     public function each_table_row($table_name, callable $emit): int
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $table = $this->site->prefixed($table_name);
         $has_id = in_array('id', $wpdb->get_col("SHOW COLUMNS FROM `$table`"), true);
@@ -270,8 +284,9 @@ class Engine
         $last = 0;
         $offset = 0;
         do {
+            /** @var list<array<string, string|null>> $batch The stub types a cell as `mixed`; `mysqli` returns every column as a string or `null`. */
             $batch = $has_id
-                ? $wpdb->get_results($wpdb->prepare("SELECT * FROM `$table` WHERE id > %d ORDER BY id ASC LIMIT 500", $last), ARRAY_A)
+                ? $wpdb->get_results($wpdb->prepare('SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500', $table, $last), ARRAY_A)
                 : $wpdb->get_results("SELECT * FROM `$table` LIMIT 500 OFFSET $offset", ARRAY_A);
             foreach ($batch as $row) {
                 $emit($row);
@@ -653,14 +668,14 @@ class Engine
      * rows this field owns" misses them and a rollback would leave them changed. The first backup of a row wins
      * (INSERT IGNORE), so the state before the run is the one a rollback restores.
      *
-     * @param  array<string, mixed>  $field
+     * @param  array<mixed>  $field
      * @param  bool  $complex  whether the field owns sub-field rows, which the backup of its own rows already holds
      */
     private function write_with_trail(string $stamp, int $post_id, string $name, array $field, bool $complex, mixed $value): void
     {
         $trail = function ($check, $object_id, $meta_key) use ($stamp, $post_id, $name, $complex) {
-            $object_id = (int) $object_id;
-            $touched = ltrim((string) $meta_key, '_');
+            $object_id = Cast::int($object_id);
+            $touched = ltrim(Cast::str($meta_key), '_');
             $own = $object_id === $post_id && ($touched === $name || ($complex && str_starts_with($touched, $name.'_')));
             if (! $own) {
                 Store::put('backup', $stamp, $object_id, $touched, [
@@ -733,6 +748,7 @@ class Engine
      */
     public function rollback_batch($stamp, $cursor, $limit = 100): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $rows = Store::rows('backup', $stamp, (int) $cursor, $limit, true);
         $posts = [];

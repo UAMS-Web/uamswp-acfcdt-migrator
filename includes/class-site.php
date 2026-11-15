@@ -9,6 +9,7 @@ namespace UAMSWP_ACFCDT_Migrator;
  * which posts to process, which ACF fields apply to a post, and where output files go.
  *
  * @phpstan-type TableDef array{name: string, post_type: string, file: string, columns: list<array{name: string, identifier: string}>}
+ * @phpstan-type PostRow object{ID: numeric-string, post_type: string, post_status: string, post_title: string, post_modified: string}
  * @phpstan-type CacheEntry array{cache_post_type: string|null, intercepting: bool, not_cached: list<string>}
  */
 class Site
@@ -25,7 +26,7 @@ class Site
     /** @var array<string, TableDef>|null */
     private ?array $defs = null;
 
-    /** @var array<string, array<string, array<string, mixed>>> */
+    /** @var array<string, array<string, array<mixed>>> */
     private array $field_cache = [];
 
     /**
@@ -108,6 +109,7 @@ class Site
      */
     public function prefixed($table): string
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         return $wpdb->prefix.$table;
@@ -118,6 +120,7 @@ class Site
      */
     public function table_exists($table): bool
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $full = $this->prefixed($table);
 
@@ -227,12 +230,13 @@ class Site
      * @param  list<string>  $types
      * @param  array<int, int|string>|int|string|null  $ids  Restrict to these post IDs.
      * @param  int|string  $limit  `0` for no limit.
-     * @return array<int, \stdClass> {ID, post_type, post_status, post_title, post_modified}
+     * @return array<int, PostRow>
      *
      * @throws \RuntimeException When the query fails.
      */
     public function posts(array $types, $ids = null, $limit = 0)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         if ($types === []) {
             return [];
@@ -242,9 +246,9 @@ class Site
         // @pest-mutate-ignore: DecrementInteger, IncrementInteger
         $in = implode(',', array_fill(0, count($types), '%s'));
         $sql = $wpdb->prepare(
-            "SELECT ID, post_type, post_status, post_title, post_modified FROM {$wpdb->posts}
+            "SELECT ID, post_type, post_status, post_title, post_modified FROM %i
 			 WHERE post_type IN ($in) AND post_status NOT IN ('auto-draft','inherit')",
-            $types
+            array_merge([$wpdb->posts], $types)
         );
         if ($ids) {
             $ids = array_filter(array_map(absint(...), (array) $ids));
@@ -256,6 +260,7 @@ class Site
             $sql .= ' LIMIT '.absint($limit);
         }
 
+        /** @var array<int, PostRow>|null $posts The stub types a row as `stdClass`, whose properties are `mixed`; the `SELECT` above names these five columns, which `mysqli` returns as strings. */
         $posts = $wpdb->get_results($sql);
         if ($posts === null) {
             throw new \RuntimeException('Cannot read the posts.');
@@ -269,7 +274,7 @@ class Site
      *
      * @param  int|string  $post_id
      * @param  string  $post_type
-     * @return array<string, array<string, mixed>>
+     * @return array<string, array<mixed>>
      */
     public function fields_for_post($post_id, $post_type)
     {
@@ -279,8 +284,9 @@ class Site
         );
         $keys = [];
         foreach ($groups as $g) {
+            $g = Cast::arr($g);
             if (! empty($g['key'])) {
-                $keys[$g['key']] = $g;
+                $keys[Cast::str($g['key'])] = $g;
             }
         }
 
@@ -291,11 +297,12 @@ class Site
             $fields = [];
             foreach ($keys as $group) {
                 foreach ((array) acf_get_fields($group) as $field) {
+                    $field = Cast::arr($field);
                     if (empty($field['name']) || in_array($field['type'], self::SKIP_TYPES, true)) {
                         continue;
                     }
 
-                    $fields[$field['name']] ??= $field;
+                    $fields[Cast::str($field['name'])] ??= $field;
                 }
             }
 
@@ -318,16 +325,20 @@ class Site
      */
     public function meta_rows_for_field($post_id, $name, $complex)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         [$where, $params] = $this->meta_where($name, $complex);
 
-        return $wpdb->get_results(
+        /** @var array<int, array<int, string|null>>|null $rows The stub types a cell as `mixed`; `mysqli` returns the two selected columns as strings or `null`. */
+        $rows = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND {$where} ORDER BY meta_id ASC",
-                array_merge([$post_id], $params)
+                "SELECT meta_key, meta_value FROM %i WHERE post_id = %d AND {$where} ORDER BY meta_id ASC",
+                array_merge([$wpdb->postmeta, $post_id], $params)
             ),
             ARRAY_N
         );
+
+        return $rows;
     }
 
     /**
@@ -338,24 +349,24 @@ class Site
      */
     public function delete_meta_rows_for_field($post_id, $name, $complex)
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         [$where, $params] = $this->meta_where($name, $complex);
 
-        return $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND {$where}",
-                array_merge([$post_id], $params)
-            )
-        );
+        return $wpdb->query(Cast::str($wpdb->prepare(
+            "DELETE FROM %i WHERE post_id = %d AND {$where}",
+            array_merge([$wpdb->postmeta, $post_id], $params)
+        )));
     }
 
     /**
      * @param  string  $name
      * @param  bool  $complex
-     * @return array{0: string, 1: list<string>} [sql fragment with placeholders, params]
+     * @return array{0: literal-string, 1: list<string>} [sql fragment with placeholders, params]
      */
     private function meta_where($name, $complex): array
     {
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $sql = '(meta_key = %s OR meta_key = %s';
         $params = [$name, '_'.$name];

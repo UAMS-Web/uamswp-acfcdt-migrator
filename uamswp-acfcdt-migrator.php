@@ -11,6 +11,7 @@ use UAMSWP_ACFCDT_Migrator\Loader;
  * Author: UAMS Web Services
  * Author URI: https://communications.uams.edu/web/
  * Network: true
+ * Requires at least: 6.8
  * Requires PHP: 8.2
  */
 

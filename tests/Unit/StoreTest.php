@@ -297,8 +297,8 @@ it('replaces by default and binds the key, the data and the time', function (): 
     $result = Store::put('change', '20260102', '42', 'field_a', ['a' => 1]);
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('REPLACE INTO wpx_acfcdt_migration (blog_id, kind, ref, post_id, field, data, created) VALUES (%d, %s, %s, %d, %s, %s, %s)')
-        ->and($args)->toBe([5, 'change', '20260102', 42, 'field_a', '{"a":1}', '2026-01-02 03:04:05'])
+    expect($query)->toBe('REPLACE INTO %i (blog_id, kind, ref, post_id, field, data, created) VALUES (%d, %s, %s, %d, %s, %s, %s)')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'change', '20260102', 42, 'field_a', '{"a":1}', '2026-01-02 03:04:05'])
         ->and($GLOBALS['store_executed'])->toBe([['query', 'P:'.$query]])
         ->and($result)->toBe(1);
 });
@@ -321,7 +321,7 @@ it('casts the post id to an integer and the field to a string', function (): voi
 
     Store::put('change', 's', '7abc', 12, null);
 
-    expect(store_prepared()[1])->toBe([5, 'change', 's', 7, '12', 'null', '2026-01-02 03:04:05']);
+    expect(store_prepared()[1])->toBe(['wpx_acfcdt_migration', 5, 'change', 's', 7, '12', 'null', '2026-01-02 03:04:05']);
 });
 
 it('asks for the time in GMT in MySQL format', function (): void {
@@ -337,7 +337,7 @@ it('encodes the data without escaping slashes or unicode', function (): void {
 
     Store::put('change', 's', 1, 'f', ['url' => 'https://x.test/a', 'name' => "caf\u{e9}"]);
 
-    expect(store_prepared()[1][5])->toBe("{\"url\":\"https://x.test/a\",\"name\":\"caf\u{e9}\"}");
+    expect(store_prepared()[1][6])->toBe("{\"url\":\"https://x.test/a\",\"name\":\"caf\u{e9}\"}");
 });
 
 // get()
@@ -348,8 +348,8 @@ it('reads one row by its full key', function (): void {
     $result = Store::get('snapshot', 'label', '9', 'f');
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('SELECT data FROM wpx_acfcdt_migration WHERE blog_id = %d AND kind = %s AND ref = %s AND post_id = %d AND field = %s')
-        ->and($args)->toBe([5, 'snapshot', 'label', 9, 'f'])
+    expect($query)->toBe('SELECT data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s AND post_id = %d AND field = %s')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'snapshot', 'label', 9, 'f'])
         ->and($GLOBALS['store_executed'])->toBe([['get_var', 'P:'.$query]])
         ->and($result)->toBe(['a' => [1, 2]]);
 });
@@ -359,14 +359,14 @@ it('binds the field as a string', function (): void {
 
     Store::get('change', 's', 1, 12);
 
-    expect(store_prepared()[1])->toBe([5, 'change', 's', 1, '12']);
+    expect(store_prepared()[1])->toBe(['wpx_acfcdt_migration', 5, 'change', 's', 1, '12']);
 });
 
 it('defaults to a header row and returns null when there is none', function (): void {
     store_wpdb(['get_var' => [null]]);
 
     expect(Store::get('run', 'stamp'))->toBeNull()
-        ->and(store_prepared()[1])->toBe([5, 'run', 'stamp', 0, '']);
+        ->and(store_prepared()[1])->toBe(['wpx_acfcdt_migration', 5, 'run', 'stamp', 0, '']);
 });
 
 it('returns a stored empty string as null from the decoder, not as a missing row', function (): void {
@@ -389,8 +389,8 @@ it('pages ascending rows after a cursor', function (): void {
     $rows = Store::rows('snapshot', 'label', 2, 50);
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('SELECT id, post_id, field, data FROM wpx_acfcdt_migration WHERE blog_id = %d AND kind = %s AND ref = %s AND id > %d ORDER BY id ASC LIMIT %d')
-        ->and($args)->toBe([5, 'snapshot', 'label', 2, 50])
+    expect($query)->toBe('SELECT id, post_id, field, data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s AND id > %d ORDER BY id ASC LIMIT %d')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'snapshot', 'label', 2, 50])
         ->and($GLOBALS['store_executed'])->toBe([['get_results', 'P:'.$query]])
         ->and($rows)->toHaveCount(1);
 });
@@ -402,7 +402,7 @@ it('defaults to the start, 500 rows and ascending order', function (): void {
 
     [$query, $args] = store_prepared();
     expect($query)->toContain('id > %d ORDER BY id ASC')
-        ->and($args)->toBe([5, 'snapshot', 'label', 0, 500]);
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'snapshot', 'label', 0, 500]);
 });
 
 it('pages descending rows before a cursor', function (): void {
@@ -412,7 +412,7 @@ it('pages descending rows before a cursor', function (): void {
 
     [$query, $args] = store_prepared();
     expect($query)->toContain('id < %d ORDER BY id DESC LIMIT %d')
-        ->and($args)->toBe([5, 'change', 's', 40, 10]);
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'change', 's', 40, 10]);
 });
 
 it('starts a descending page from the largest id when there is no cursor', function (mixed $cursor): void {
@@ -421,7 +421,7 @@ it('starts a descending page from the largest id when there is no cursor', funct
     // `rows()` documents `int`; the dataset's other types are the unset cursors it must treat as zero.
     (new ReflectionMethod(Store::class, 'rows'))->invoke(null, 'change', 's', $cursor, 10, true);
 
-    expect(store_prepared()[1][3])->toBe(PHP_INT_MAX);
+    expect(store_prepared()[1][4])->toBe(PHP_INT_MAX);
 })->with([0, '0', null, false]);
 
 it('leaves an ascending cursor of zero alone', function (): void {
@@ -429,7 +429,7 @@ it('leaves an ascending cursor of zero alone', function (): void {
 
     Store::rows('change', 's', 0, 10, false);
 
-    expect(store_prepared()[1][3])->toBe(0);
+    expect(store_prepared()[1][4])->toBe(0);
 });
 
 // by_post()
@@ -441,7 +441,7 @@ it('keys decoded rows by post id', function (): void {
     ]]]);
 
     expect(Store::by_post('snapshot', 'label'))->toBe([10 => ['a' => 1], 11 => [2]])
-        ->and(store_prepared()[1])->toBe([5, 'snapshot', 'label', 0, 1000]);
+        ->and(store_prepared()[1])->toBe(['wpx_acfcdt_migration', 5, 'snapshot', 'label', 0, 1000]);
 });
 
 it('throws, naming the kind and reference, when the rows query fails', function (): void {
@@ -473,9 +473,9 @@ it('keeps paging while a full page of 1000 comes back, from the last id seen', f
     $out = Store::by_post('snapshot', 'label');
 
     expect(count(store_global('store_prepared')))->toBe(2)
-        ->and(store_prepared(0)[1][3])->toBe(0)
-        ->and(store_prepared(1)[1][3])->toBe(1000)
+        ->and(store_prepared(0)[1][4])->toBe(0)
         ->and(store_prepared(1)[1][4])->toBe(1000)
+        ->and(store_prepared(1)[1][5])->toBe(1000)
         ->and($out)->toHaveCount(1001)
         ->and($out[1])->toBe(1)
         ->and($out[5000])->toBe('last');
@@ -513,8 +513,8 @@ it('counts the rows of a kind and ref', function (): void {
     $total = Store::count('change', 'stamp');
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('SELECT COUNT(*) FROM wpx_acfcdt_migration WHERE blog_id = %d AND kind = %s AND ref = %s ')
-        ->and($args)->toBe([5, 'change', 'stamp'])
+    expect($query)->toBe('SELECT COUNT(*) FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s ')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'change', 'stamp'])
         ->and($GLOBALS['store_executed'])->toBe([['get_var', 'P:'.$query]])
         ->and($total)->toBe(12);
 });
@@ -541,8 +541,8 @@ it('deletes the given kinds of one ref, one placeholder per kind', function (): 
     $result = Store::delete(['change', 'backup', 'run'], 'stamp');
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('DELETE FROM wpx_acfcdt_migration WHERE blog_id = %d AND ref = %s AND kind IN (%s,%s,%s)')
-        ->and($args)->toBe([[5, 'stamp', 'change', 'backup', 'run']])
+    expect($query)->toBe('DELETE FROM %i WHERE blog_id = %d AND ref = %s AND kind IN (%s,%s,%s)')
+        ->and($args)->toBe([['wpx_acfcdt_migration', 5, 'stamp', 'change', 'backup', 'run']])
         ->and($GLOBALS['store_executed'])->toBe([['query', 'P:'.$query]])
         ->and($result)->toBe(4);
 });
@@ -566,8 +566,8 @@ it('lists header rows newest first, merging the creation time under the header d
     $out = Store::headers('snapinfo');
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('SELECT ref, data, created FROM wpx_acfcdt_migration WHERE blog_id = %d AND kind = %s ORDER BY id DESC')
-        ->and($args)->toBe([5, 'snapinfo'])
+    expect($query)->toBe('SELECT ref, data, created FROM %i WHERE blog_id = %d AND kind = %s ORDER BY id DESC')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'snapinfo'])
         ->and($GLOBALS['store_executed'])->toBe([['get_results', 'P:'.$query]])
         ->and(array_keys($out))->toBe(['b', 'a'])
         ->and($out['b'])->toBe(['mode' => 'x', 'created' => '2026-01-02 00:00:00'])
@@ -610,8 +610,8 @@ it('reads the change rows of one run', function (): void {
     Store::change_summary('stamp');
 
     [$query, $args] = store_prepared();
-    expect($query)->toBe('SELECT data FROM wpx_acfcdt_migration WHERE blog_id = %d AND kind = %s AND ref = %s')
-        ->and($args)->toBe([5, 'change', 'stamp'])
+    expect($query)->toBe('SELECT data FROM %i WHERE blog_id = %d AND kind = %s AND ref = %s')
+        ->and($args)->toBe(['wpx_acfcdt_migration', 5, 'change', 'stamp'])
         ->and($GLOBALS['store_executed'])->toBe([['get_col', 'P:'.$query]]);
 });
 

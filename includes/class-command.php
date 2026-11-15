@@ -136,6 +136,7 @@ class Command
             return;
         }
 
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
         $site = new Site($this->opt($assoc, 'json-dir'));
         $dir = Site::out_dir($this->opt($assoc, 'dir'), 'archive/'.sanitize_file_name(Cast::str($assoc['stamp'])));
@@ -157,8 +158,9 @@ class Command
             $has_id = in_array('id', $wpdb->get_col("SHOW COLUMNS FROM `$table`"), true);
             $offset = 0;
             do {
+                /** @var list<array<string, string|null>> $batch The stub types a cell as `mixed`; `mysqli` returns every column as a string or `null`. */
                 $batch = $has_id
-                    ? $wpdb->get_results($wpdb->prepare("SELECT * FROM `$table` WHERE id > %d ORDER BY id ASC LIMIT 500", $last), ARRAY_A)
+                    ? $wpdb->get_results($wpdb->prepare('SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500', $table, $last), ARRAY_A)
                     : $wpdb->get_results("SELECT * FROM `$table` LIMIT 500 OFFSET $offset", ARRAY_A);
                 foreach ($batch as $row) {
                     fwrite($fh, wp_json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
@@ -196,6 +198,7 @@ class Command
 
                     return "(`$c` IS NOT NULL AND `$c` <> '' AND `$c` <> '[]')";
                 }, $orphans));
+                /** @var list<array<string, string|null>> $rows The stub types a cell as `mixed`; `mysqli` returns every column as a string or `null`. */
                 $rows = $wpdb->get_results("SELECT $quoted FROM `$table` WHERE $where ORDER BY post_id", ARRAY_A);
                 $oh = fopen($orphan_file, 'w');
                 if ($oh === false) {
@@ -560,6 +563,7 @@ class Command
         }
 
         unset($assoc['network']);
+        /** @var \wpdb $wpdb WordPress global declared by core. */
         global $wpdb;
 
         $table_names = array_keys((new Site($this->opt($assoc, 'json-dir')))->table_defs());
@@ -570,7 +574,7 @@ class Command
         $targets = [];
         $skipped = [];
         foreach (get_sites(['number' => 0, 'deleted' => 0]) as $s) {
-            $prefix = $wpdb->get_blog_prefix($s->blog_id);
+            $prefix = $wpdb->get_blog_prefix((int) $s->blog_id);
             $has = false;
             foreach ($table_names as $t) {
                 if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($prefix.$t))) === $prefix.$t) {
@@ -592,7 +596,7 @@ class Command
 
         // launch_self() only forwards path/url/user/allow-root, so pass through what the child needs.
         $assoc['require'] = UAMSWP_ACFCDT_MIGRATOR_FILE;
-        $config = WP_CLI::get_runner()->config;
+        $config = $this->global_config();
         foreach (['skip-plugins', 'skip-themes'] as $global) {
             if (! empty($config[$global])) {
                 $assoc[$global] = is_array($config[$global]) ? implode(',', Cast::strings($config[$global])) : $config[$global];
@@ -620,6 +624,20 @@ class Command
     }
 
     /**
+     * WP-CLI's parsed global configuration.
+     *
+     * @return array<string, mixed>
+     */
+    private function global_config(): array
+    {
+        // `WP_CLI::get_runner()` has no return type in the stubs, and the stubs declare `Runner::$config` private.
+        /** @var object{config: array<string, mixed>} $runner */
+        $runner = WP_CLI::get_runner();
+
+        return $runner->config;
+    }
+
+    /**
      * Like WP_CLI::launch_self(), but streams the child's output live instead of buffering it.
      *
      * @param  array<int, string>  $args
@@ -628,7 +646,7 @@ class Command
      */
     private function run_child(string $command, $args, $assoc, string $url): int
     {
-        $config = WP_CLI::get_runner()->config;
+        $config = $this->global_config();
         foreach (['path', 'user', 'allow-root'] as $key) {
             if (! empty($config[$key]) && ! isset($assoc[$key])) {
                 $assoc[$key] = $config[$key];
@@ -659,16 +677,13 @@ class Command
     }
 
     /**
-     * Read a flag the way `get_flag_value()` does; WP-CLI types its argument as bool|string values only.
+     * Read a flag the way `get_flag_value()` does.
      *
      * @param  array<string, mixed>  $assoc
      */
     private function flag($assoc, string $name, mixed $default = null): mixed
     {
-        /** @var array<string, bool|string> $flags */
-        $flags = $assoc;
-
-        return get_flag_value($flags, $name, $default);
+        return get_flag_value($assoc, $name, $default);
     }
 
     /**

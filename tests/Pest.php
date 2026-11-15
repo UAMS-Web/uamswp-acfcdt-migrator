@@ -28,7 +28,12 @@ uses()
         setUp();
     })
     ->afterEach(function (): void {
-        $this->addToAssertionCount(Mockery::getContainer()->mockery_getExpectationCount());
+        // One passing expectation per Mockery expectation, so the test is not risky.
+        $expectations = Mockery::getContainer()->mockery_getExpectationCount();
+
+        for ($i = 0; $i < $expectations; $i++) {
+            expect(true)->toBeTrue();
+        }
 
         tearDown();
     })
