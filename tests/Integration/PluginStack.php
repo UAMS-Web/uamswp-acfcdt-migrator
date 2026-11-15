@@ -38,9 +38,11 @@ final class PluginStack
 
     /**
      * A fingerprint of every file under a plugin directory: SHA-256 over the sorted relative paths, each
-     * with the SHA-256 of its bytes after every CRLF is read as LF. File names that only the operating system
-     * adds are left out. The line-ending rule is there because one plugin's published zip ships CRLF where a
-     * copy installed another way carries LF, and the same code must not fail the check for that alone.
+     * with the SHA-256 of its bytes after every CRLF is read as LF, and every backslash in a path read as a
+     * slash. File names that only the operating system adds are left out. The two rules are there because one
+     * plugin's published zip ships CRLF where a copy installed another way carries LF, and a Windows machine
+     * writes `src\file.php` where macOS and Linux write `src/file.php`; the same files must not fail the check
+     * for either.
      */
     public static function fingerprint(string $directory): string
     {
@@ -64,7 +66,9 @@ final class PluginStack
                 throw new \RuntimeException('Cannot read '.$file->getPathname().' to fingerprint it.');
             }
 
-            $lines[] = substr($file->getPathname(), strlen($directory) + 1)."\t".hash('sha256', str_replace("\r\n", "\n", $bytes));
+            $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($directory) + 1));
+
+            $lines[] = $relative."\t".hash('sha256', str_replace("\r\n", "\n", $bytes));
         }
 
         sort($lines, SORT_STRING);

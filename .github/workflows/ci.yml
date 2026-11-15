@@ -71,8 +71,8 @@ jobs:
       WP_VERSION: '7.0.8'
       ACF_PRO_VERSION: '6.4.2'
       ACF_EXTENDED_VERSION: '0.9.2.6'
-      ACFCDT_STORE: UAMS-Web/uamswp-acfcdt-fixtures
-      ACFCDT_ZIP: acf-custom-database-tables-1.1.0-beta3.zip
+      ACFCDT_STORE: UAMS-Web/uamswp-acf-custom-database-tables
+      ACFCDT_REF: main
       # A development-format URL, so the ACF Pro download activates a development site and never a production one.
       ACF_SITE_URL: http://localhost
       WP_TESTS_DB_NAME: uamswp_acfcdt_tests
@@ -157,6 +157,8 @@ jobs:
           rm -rf "$work"
 
       # The beta is not publicly distributed, so it comes from a private repository with a read-only token (#76).
+      # The tarball holds only the files that repository's `.gitattributes` leaves out of an archive, which is the
+      # plugin itself, so the stack check below fingerprints exactly what ships.
       - name: Download ACF Custom Database Tables
         if: steps.trust.outputs.trusted == 'true'
         env:
@@ -164,13 +166,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$ACFCDT_READ_TOKEN" ]; then echo "::error::The ACFCDT_READ_TOKEN secret is empty"; exit 1; fi
+          mkdir -p "$RUNNER_TEMP/plugins/acf-custom-database-tables"
           curl -fsSL \
             -H "Authorization: Bearer $ACFCDT_READ_TOKEN" \
-            -H "Accept: application/vnd.github.raw+json" \
-            -o "$RUNNER_TEMP/acfcdt.zip" \
-            "https://api.github.com/repos/${ACFCDT_STORE}/contents/${ACFCDT_ZIP}"
-          unzip -q "$RUNNER_TEMP/acfcdt.zip" -d "$RUNNER_TEMP/plugins"
-          rm "$RUNNER_TEMP/acfcdt.zip"
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${ACFCDT_STORE}/tarball/${ACFCDT_REF}" \
+            | tar -xz --strip-components=1 -C "$RUNNER_TEMP/plugins/acf-custom-database-tables"
 
       # The bootstrap compares each plugin's version and the fingerprint of its files with
       # tests/Integration/plugin-stack.json before it boots anything, and exits non-zero naming the plugin.
