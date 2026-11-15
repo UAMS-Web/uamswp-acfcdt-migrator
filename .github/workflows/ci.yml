@@ -72,7 +72,8 @@ jobs:
       ACF_PRO_VERSION: '6.4.2'
       ACF_EXTENDED_VERSION: '0.9.2.6'
       ACFCDT_STORE: UAMS-Web/uamswp-acf-custom-database-tables
-      ACFCDT_REF: main
+      # The tag on the private repository that matches the plugin header's version.
+      ACFCDT_REF: v1.1.0-beta3
       # A development-format URL, so the ACF Pro download activates a development site and never a production one.
       ACF_SITE_URL: http://localhost
       WP_TESTS_DB_NAME: uamswp_acfcdt_tests
@@ -184,17 +185,6 @@ jobs:
       - name: Run the Integration suite
         if: steps.trust.outputs.trusted == 'true'
         run: composer test:integration
-
-      # TEMPORARY: lists each ACF Pro file with the first 12 hex characters of its LF-normalized SHA-256, to find
-      # why the Composer download differs from the pinned copy. Removed once the cause is known.
-      - name: Diagnose the ACF Pro mismatch (temporary)
-        if: failure() && steps.trust.outputs.trusted == 'true'
-        run: |
-          cd "$RUNNER_TEMP/plugins/advanced-custom-fields-pro"
-          echo "files: $(find . -type f ! -name .DS_Store | wc -l)"
-          find . -type f ! -name .DS_Store | sort | while read -r f; do
-            printf 'DIAG\t%s\t%s\n' "${f#./}" "$(tr -d '\r' < "$f" | sha256sum | cut -c1-12)"
-          done
 
   # The one check a ruleset requires from this workflow. Keep `needs:` naming the call and the jobs above.
   ci:
