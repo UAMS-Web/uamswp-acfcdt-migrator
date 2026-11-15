@@ -297,6 +297,13 @@ it('pages posts above a cursor in ascending order', function (): void {
         ->and(eng_inv_log())->toBe([['get_results', 'P:'.eng_inv_flat($query).' ORDER BY ID ASC LIMIT 25']]);
 });
 
+it('throws when the posts query fails', function (): void {
+    eng_inv_wpdb();
+    $engine = eng_inv_engine(['post_types' => fn (): array => ['doctor']]);
+
+    expect(fn (): mixed => eng_inv_next($engine, 0, 25))->toThrow(RuntimeException::class, 'Cannot read the posts.');
+});
+
 it('returns no posts, and runs no query, when the site has no post types', function (): void {
     eng_inv_wpdb();
     $engine = eng_inv_engine(['post_types' => fn (): array => []]);

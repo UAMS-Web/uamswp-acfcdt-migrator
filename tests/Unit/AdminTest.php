@@ -1087,7 +1087,7 @@ it('rejects a stored-set download whose reference is not allowed, and sends no h
     }
 
     expect($died)->toBeInstanceOf(AdminTestDied::class)
-        ->and($died->getMessage())->toContain('bad name')
+        ->and($died?->getMessage())->toContain('bad name')
         ->and(adm_headers())->toBe([]);
 });
 

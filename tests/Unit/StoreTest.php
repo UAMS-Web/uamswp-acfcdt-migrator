@@ -227,7 +227,7 @@ it('hands dbDelta the table definition, built with the table name and the charse
 
     Store::install();
 
-    $flat = preg_replace('/\s+/', ' ', $sql['sql']);
+    $flat = preg_replace('/\s+/', ' ', $sql['sql'] ?? '');
     expect($flat)->toStartWith('CREATE TABLE wpx_acfcdt_migration ( id bigint(20) unsigned NOT NULL AUTO_INCREMENT, ')
         ->and($flat)->toContain('blog_id bigint(20) unsigned NOT NULL DEFAULT 0,')
         ->and($flat)->toContain("kind varchar(20) NOT NULL DEFAULT '',")
@@ -361,7 +361,7 @@ it('pages ascending rows after a cursor', function (): void {
 });
 
 it('defaults to the start, 500 rows and ascending order', function (): void {
-    store_wpdb();
+    store_wpdb(['get_results' => [[]]]);
 
     Store::rows('snapshot', 'label');
 
@@ -371,7 +371,7 @@ it('defaults to the start, 500 rows and ascending order', function (): void {
 });
 
 it('pages descending rows before a cursor', function (): void {
-    store_wpdb();
+    store_wpdb(['get_results' => [[]]]);
 
     Store::rows('change', 's', 40, 10, true);
 
@@ -381,7 +381,7 @@ it('pages descending rows before a cursor', function (): void {
 });
 
 it('starts a descending page from the largest id when there is no cursor', function (mixed $cursor): void {
-    store_wpdb();
+    store_wpdb(['get_results' => [[]]]);
 
     Store::rows('change', 's', $cursor, 10, true);
 
@@ -389,7 +389,7 @@ it('starts a descending page from the largest id when there is no cursor', funct
 })->with([0, '0', null, false]);
 
 it('leaves an ascending cursor of zero alone', function (): void {
-    store_wpdb();
+    store_wpdb(['get_results' => [[]]]);
 
     Store::rows('change', 's', 0, 10, false);
 
@@ -406,6 +406,18 @@ it('keys decoded rows by post id', function (): void {
 
     expect(Store::by_post('snapshot', 'label'))->toBe([10 => ['a' => 1], 11 => [2]])
         ->and(store_prepared()[1])->toBe([5, 'snapshot', 'label', 0, 1000]);
+});
+
+it('throws, naming the kind and reference, when the rows query fails', function (): void {
+    store_wpdb();
+
+    expect(fn () => Store::rows('snapshot', 'label'))->toThrow(RuntimeException::class, 'Cannot read the snapshot rows for label.');
+});
+
+it('does not read a failed query as an empty set while paging', function (): void {
+    store_wpdb();
+
+    expect(fn (): array => Store::by_post('snapshot', 'label'))->toThrow(RuntimeException::class);
 });
 
 it('returns an empty array when there are no rows', function (): void {

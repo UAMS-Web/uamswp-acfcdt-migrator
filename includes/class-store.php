@@ -118,7 +118,9 @@ class Store
      * @param  int  $after_id  Last row id already read; with `$desc`, `0` starts from the newest.
      * @param  int  $limit
      * @param  bool  $desc  Walk from the newest row down instead of the oldest up.
-     * @return array<int, \stdClass>|null
+     * @return array<int, \stdClass>
+     *
+     * @throws \RuntimeException When the query fails.
      */
     public static function rows($kind, $ref, $after_id = 0, $limit = 500, $desc = false)
     {
@@ -129,7 +131,7 @@ class Store
             $after_id = PHP_INT_MAX;
         }
 
-        return $wpdb->get_results($wpdb->prepare(
+        $rows = $wpdb->get_results($wpdb->prepare(
             'SELECT id, post_id, field, data FROM '.self::table()." WHERE blog_id = %d AND kind = %s AND ref = %s AND id $op %d ORDER BY id $order LIMIT %d",
             get_current_blog_id(),
             $kind,
@@ -137,6 +139,11 @@ class Store
             $after_id,
             $limit
         ));
+        if ($rows === null) {
+            throw new \RuntimeException("Cannot read the $kind rows for $ref.");
+        }
+
+        return $rows;
     }
 
     /**

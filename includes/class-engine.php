@@ -80,7 +80,9 @@ class Engine
      * @param  int|string  $cursor
      * @param  int|string  $limit
      * @param  array<int, int|string>|null  $ids
-     * @return array<int, \stdClass>|null
+     * @return array<int, \stdClass>
+     *
+     * @throws \RuntimeException When the query fails.
      */
     private function next_posts($cursor, $limit, $ids = null)
     {
@@ -102,7 +104,12 @@ class Engine
             $sql .= ' AND ID IN ('.implode(',', array_map(absint(...), $ids)).')';
         }
 
-        return $wpdb->get_results($sql.' ORDER BY ID ASC LIMIT '.max(1, (int) $limit));
+        $posts = $wpdb->get_results($sql.' ORDER BY ID ASC LIMIT '.max(1, (int) $limit));
+        if ($posts === null) {
+            throw new \RuntimeException('Cannot read the posts.');
+        }
+
+        return $posts;
     }
 
     /* ================================================================== inventory */

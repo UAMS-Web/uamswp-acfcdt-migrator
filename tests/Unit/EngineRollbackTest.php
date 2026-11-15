@@ -138,7 +138,7 @@ function eng_rb_entry(int $post_id, string $field, array $rows, ?bool $complex =
  */
 function eng_rb_calls(ArrayObject $st, string ...$names): array
 {
-    return array_values(array_filter($st['log'], fn (array $row): bool => in_array($row[0], $names, true)));
+    return array_values(array_filter($st['log'] ?? [], fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
 /**
@@ -149,7 +149,7 @@ function eng_rb_calls(ArrayObject $st, string ...$names): array
  */
 function eng_rb_order(ArrayObject $st): array
 {
-    return array_values(array_map(fn (array $row): string => $row[0], $st['log']));
+    return array_map(fn (array $row): string => $row[0], $st['log'] ?? []);
 }
 
 /** The dash the messages hold, written as an escape so no literal U+2014 sits in this file. */

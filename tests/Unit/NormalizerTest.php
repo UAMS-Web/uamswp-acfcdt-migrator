@@ -169,7 +169,7 @@ it('sorts the cells of a row by name', function (): void {
 
     $row = Normalizer::value($field, [['field_z' => '1', 'field_a' => '2']]);
 
-    expect(array_keys($row[0]))->toBe(['alpha', 'zed']);
+    expect(array_keys((array) current((array) $row)))->toBe(['alpha', 'zed']);
 });
 
 it('reads a repeater with no sub fields through the generic form', function (): void {

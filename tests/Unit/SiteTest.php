@@ -500,6 +500,13 @@ it('finds no posts for no post types, without asking the database', function ():
         ->and($GLOBALS['site_prepared'])->toBe([]);
 });
 
+it('throws when the posts query fails', function (): void {
+    $wpdb = site_wpdb();
+    $wpdb->shouldReceive('get_results')->once()->andReturn(null);
+
+    expect(fn () => (new Site)->posts(['provider']))->toThrow(RuntimeException::class, 'Cannot read the posts.');
+});
+
 /**
  * The query `Site::posts()` runs, and what it prepared it from.
  *
@@ -724,6 +731,7 @@ it('selects the meta rows of a simple field and its key reference', function ():
     $wpdb->shouldReceive('get_results')->andReturnUsing(fn (string $sql, string $output): array => [[$sql, $output]]);
 
     $rows = (new Site)->meta_rows_for_field(12, 'my_field', false);
+    $rows ??= [];
 
     expect($GLOBALS['site_prepared'])->toBe([[
         'SELECT meta_key, meta_value FROM wp_postmeta WHERE post_id = %d AND (meta_key = %s OR meta_key = %s) ORDER BY meta_id ASC',
