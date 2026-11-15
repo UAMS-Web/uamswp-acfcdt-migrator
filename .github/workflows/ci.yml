@@ -185,6 +185,17 @@ jobs:
         if: steps.trust.outputs.trusted == 'true'
         run: composer test:integration
 
+      # TEMPORARY: lists each ACF Pro file with the first 12 hex characters of its LF-normalized SHA-256, to find
+      # why the Composer download differs from the pinned copy. Removed once the cause is known.
+      - name: Diagnose the ACF Pro mismatch (temporary)
+        if: failure() && steps.trust.outputs.trusted == 'true'
+        run: |
+          cd "$RUNNER_TEMP/plugins/advanced-custom-fields-pro"
+          echo "files: $(find . -type f ! -name .DS_Store | wc -l)"
+          find . -type f ! -name .DS_Store | sort | while read -r f; do
+            printf 'DIAG\t%s\t%s\n' "${f#./}" "$(tr -d '\r' < "$f" | sha256sum | cut -c1-12)"
+          done
+
   # The one check a ruleset requires from this workflow. Keep `needs:` naming the call and the jobs above.
   ci:
     name: CI
