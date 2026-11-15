@@ -119,7 +119,7 @@ function eng_snap_wire(array $answers = []): ArrayObject
  */
 function eng_snap_calls(ArrayObject $st, array $names): array
 {
-    return array_values(array_filter($st['log'], fn (array $row): bool => in_array($row[0], $names, true)));
+    return array_values(array_filter($st['log'] ?? [], fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
 /**
@@ -130,7 +130,7 @@ function eng_snap_calls(ArrayObject $st, array $names): array
  */
 function eng_snap_order(ArrayObject $st): array
 {
-    return array_values(array_map(fn (array $row): string => $row[0], $st['log']));
+    return array_map(fn (array $row): string => $row[0], $st['log'] ?? []);
 }
 
 /**
@@ -570,10 +570,10 @@ it('cleans both names and reads each snapshot in order', function (): void {
     eng_snap_engine()->compare('a', 'b');
 
     expect(eng_snap_order($st))->toBe(['get', 'get', 'by_post', 'by_post'])
-        ->and($st['log'][0])->toBe(['get', 'snapinfo', 'a'])
-        ->and($st['log'][1])->toBe(['get', 'snapinfo', 'b'])
-        ->and($st['log'][2])->toBe(['by_post', 'snapshot', 'a'])
-        ->and($st['log'][3])->toBe(['by_post', 'snapshot', 'b']);
+        ->and(($st['log'] ?? [])[0])->toBe(['get', 'snapinfo', 'a'])
+        ->and(($st['log'] ?? [])[1])->toBe(['get', 'snapinfo', 'b'])
+        ->and(($st['log'] ?? [])[2])->toBe(['by_post', 'snapshot', 'a'])
+        ->and(($st['log'] ?? [])[3])->toBe(['by_post', 'snapshot', 'b']);
 });
 
 it('rejects a snapshot name with other characters before reading anything', function (string $a, string $b, string $shown): void {

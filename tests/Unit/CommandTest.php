@@ -972,7 +972,7 @@ it('uses the config path from the environment when there is one', function (): v
 
     (new Command)->status([], ['network' => true]);
 
-    expect(cmd_process_call('open')[1])->toStartWith('WP_CLI_CONFIG_PATH='.escapeshellarg('/etc/wp.yml').' ');
+    expect((cmd_process_call('open') ?? [])[1])->toStartWith('WP_CLI_CONFIG_PATH='.escapeshellarg('/etc/wp.yml').' ');
 });
 
 it('keeps an option the caller already gave over the one in the WP-CLI config', function (): void {
@@ -982,7 +982,7 @@ it('keeps an option the caller already gave over the one in the WP-CLI config', 
 
     (new Command)->status([], ['network' => true, 'path' => '/from-caller']);
 
-    expect(cmd_process_call('open')[1])->toContain('--assoc='.json_encode(['path' => '/from-caller', 'require' => UAMSWP_ACFCDT_MIGRATOR_FILE, 'url' => 'a.test/']));
+    expect((cmd_process_call('open') ?? [])[1])->toContain('--assoc='.json_encode(['path' => '/from-caller', 'require' => UAMSWP_ACFCDT_MIGRATOR_FILE, 'url' => 'a.test/']));
 });
 
 it('returns the exit code of the child process', function (): void {

@@ -217,7 +217,9 @@ class Site
      * @param  list<string>  $types
      * @param  array<int, int|string>|int|string|null  $ids  Restrict to these post IDs.
      * @param  int|string  $limit  `0` for no limit.
-     * @return array<int, \stdClass>|null {ID, post_type, post_status, post_title, post_modified}
+     * @return array<int, \stdClass> {ID, post_type, post_status, post_title, post_modified}
+     *
+     * @throws \RuntimeException When the query fails.
      */
     public function posts(array $types, $ids = null, $limit = 0)
     {
@@ -244,7 +246,12 @@ class Site
             $sql .= ' LIMIT '.absint($limit);
         }
 
-        return $wpdb->get_results($sql);
+        $posts = $wpdb->get_results($sql);
+        if ($posts === null) {
+            throw new \RuntimeException('Cannot read the posts.');
+        }
+
+        return $posts;
     }
 
     /**
