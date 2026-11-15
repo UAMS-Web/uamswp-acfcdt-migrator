@@ -3,7 +3,7 @@
         "advanced-custom-fields-pro": {
             "main": "acf.php",
             "version": "6.4.2",
-            "sha256": "d781ae2f21c1fd1af5e8403a59f2e9e5f87bbe5edb14b9e145510c435e2ee3f0"
+            "sha256": "ef397f885bfc1ec137e8ab770a1f9a62e5d421dbdd88612d8c545f3befe38cb9"
         },
         "acf-extended": {
             "main": "acf-extended.php",

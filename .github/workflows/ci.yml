@@ -16,6 +16,11 @@ name: CI
 # adding it to the `needs:` list of `CI`. Do not rename `CI`, and do not rename `checks` without changing
 # `needs:` below.
 #
+# The `integration` job is the plugin's own: it boots a real WordPress with the real ACF plugin stack (ACF Pro,
+# ACF Extended, ACF Custom Database Tables) and runs `composer test:integration`. Where each plugin comes from is
+# decided in docs/DECISIONS.md (#76). A pull request from a fork gets no secrets, so the job reports success with
+# a notice on a fork run and does not fetch the licensed plugins; `CI` therefore still needs it on every run.
+#
 # What the plugin carries for the call, because the called jobs check out this repository:
 # `.github/actions/setup/action.yml`, the synced `.claude/skills` scripts, the Composer scripts `test:pint`,
 # `test:refactor`, `stan` and `test:unit`, and `scripts/lint-floor.php`.
@@ -57,10 +62,126 @@ jobs:
       download-archive-command: node .claude/skills/download-archive-check/check-download-archive.mjs
       pest-command: composer test:unit
 
-  # The one check a ruleset requires from this workflow. Keep `needs:` naming the call.
+  # The Integration suite (PHPUnit 9.6 over wp-phpunit) against a real WordPress and the real plugin stack.
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WP_VERSION: '7.0.8'
+      ACF_PRO_VERSION: '6.4.2'
+      ACF_EXTENDED_VERSION: '0.9.2.6'
+      ACFCDT_STORE: UAMS-Web/uamswp-acfcdt-fixtures
+      ACFCDT_ZIP: acf-custom-database-tables-1.1.0-beta3.zip
+      # A development-format URL, so the ACF Pro download activates a development site and never a production one.
+      ACF_SITE_URL: http://localhost
+      WP_TESTS_DB_NAME: uamswp_acfcdt_tests
+      WP_TESTS_DB_USER: root
+      WP_TESTS_DB_PASSWORD: root
+      WP_TESTS_DB_HOST: 127.0.0.1
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: uamswp_acfcdt_tests
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      # A pull request from a fork receives no secrets. It skips the licensed downloads with a notice that says why,
+      # and the job still reports success so that `CI` (which needs every job to succeed) does not fail on it.
+      - name: Decide whether this run can read the secrets
+        id: trust
+        env:
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          if [ "$IS_FORK" = "true" ]; then
+            echo "trusted=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Integration skipped::This pull request comes from a fork, so it receives no secrets and cannot download ACF Pro or ACF Custom Database Tables. A maintainer runs the suite on a branch of this repository."
+          else
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.trust.outputs.trusted == 'true'
+
+      - name: Set up PHP and Composer
+        if: steps.trust.outputs.trusted == 'true'
+        uses: ./.github/actions/setup
+
+      - name: Install the Integration suite's Composer setup
+        if: steps.trust.outputs.trusted == 'true'
+        run: composer setup:integration
+
+      - name: Download WordPress ${{ env.WP_VERSION }}
+        if: steps.trust.outputs.trusted == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/wordpress"
+          curl -fsSL "https://downloads.wordpress.org/release/wordpress-${WP_VERSION}.tar.gz" | tar -xz --strip-components=1 -C "$RUNNER_TEMP/wordpress"
+          test -r "$RUNNER_TEMP/wordpress/wp-settings.php"
+          mkdir -p "$RUNNER_TEMP/plugins"
+          echo "WP_TESTS_ABSPATH=$RUNNER_TEMP/wordpress" >> "$GITHUB_ENV"
+          echo "WP_TESTS_PLUGINS_DIR=$RUNNER_TEMP/plugins" >> "$GITHUB_ENV"
+
+      # The free edition the manifest pins, from wordpress.org with no key (#76).
+      - name: Download ACF Extended ${{ env.ACF_EXTENDED_VERSION }}
+        if: steps.trust.outputs.trusted == 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/acf-extended.zip" "https://downloads.wordpress.org/plugin/acf-extended.${ACF_EXTENDED_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/acf-extended.zip" -d "$RUNNER_TEMP/plugins"
+          rm "$RUNNER_TEMP/acf-extended.zip"
+
+      # ACF's key-authenticated Composer repository: the username is the license key and the password is the
+      # site URL, which ACF activates on download. The key is read from the secret into the environment of this
+      # step alone, and nothing is uploaded as an artifact (this repository is public).
+      - name: Download ACF Pro ${{ env.ACF_PRO_VERSION }}
+        if: steps.trust.outputs.trusted == 'true'
+        env:
+          ACF_PRO_LICENSE_KEY: ${{ secrets.ACF_PRO_LICENSE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACF_PRO_LICENSE_KEY" ]; then echo "::error::The ACF_PRO_LICENSE_KEY secret is empty"; exit 1; fi
+          work="$RUNNER_TEMP/acf-pro"
+          mkdir -p "$work"
+          cd "$work"
+          printf '%s' '{"name":"uamswp/acf-pro-fetch","require":{"wpengine/advanced-custom-fields-pro":"'"$ACF_PRO_VERSION"'"},"repositories":[{"type":"composer","url":"https://connect.advancedcustomfields.com"}]}' > composer.json
+          COMPOSER_AUTH="$(jq -cn --arg k "$ACF_PRO_LICENSE_KEY" --arg u "$ACF_SITE_URL" '{"http-basic":{"connect.advancedcustomfields.com":{"username":$k,"password":$u}}}')" \
+            composer install --no-interaction --no-progress --no-plugins --no-scripts
+          cp -R vendor/wpengine/advanced-custom-fields-pro "$RUNNER_TEMP/plugins/advanced-custom-fields-pro"
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "$work"
+
+      # The beta is not publicly distributed, so it comes from a private repository with a read-only token (#76).
+      - name: Download ACF Custom Database Tables
+        if: steps.trust.outputs.trusted == 'true'
+        env:
+          ACFCDT_READ_TOKEN: ${{ secrets.ACFCDT_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACFCDT_READ_TOKEN" ]; then echo "::error::The ACFCDT_READ_TOKEN secret is empty"; exit 1; fi
+          curl -fsSL \
+            -H "Authorization: Bearer $ACFCDT_READ_TOKEN" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -o "$RUNNER_TEMP/acfcdt.zip" \
+            "https://api.github.com/repos/${ACFCDT_STORE}/contents/${ACFCDT_ZIP}"
+          unzip -q "$RUNNER_TEMP/acfcdt.zip" -d "$RUNNER_TEMP/plugins"
+          rm "$RUNNER_TEMP/acfcdt.zip"
+
+      # The bootstrap compares each plugin's version and the fingerprint of its files with
+      # tests/Integration/plugin-stack.json before it boots anything, and exits non-zero naming the plugin.
+      - name: Run the Integration suite
+        if: steps.trust.outputs.trusted == 'true'
+        run: composer test:integration
+
+  # The one check a ruleset requires from this workflow. Keep `needs:` naming the call and the jobs above.
   ci:
     name: CI
-    needs: [checks]
+    needs: [checks, integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
