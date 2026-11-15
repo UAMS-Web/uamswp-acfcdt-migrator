@@ -31,6 +31,7 @@ declare(strict_types=1);
 
 use Brain\Monkey\Functions;
 use UAMSWP_ACFCDT_Migrator\Admin;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\Site;
 use UAMSWP_ACFCDT_Migrator\Store;
@@ -40,6 +41,58 @@ use function Patchwork\redefine;
 
 require_once __DIR__.'/Fixtures/process-shims.php';
 require_once __DIR__.'/Fixtures/admin-shims.php';
+
+/**
+ * A list a helper keeps in `$GLOBALS`, or an empty one when the key is not set.
+ *
+ * @return array<mixed>
+ */
+function adm_global(string $key): array
+{
+    return Cast::arr($GLOBALS[$key] ?? []);
+}
+
+/** Appends an entry to a list a helper keeps in `$GLOBALS`. */
+function adm_push(string $key, mixed $entry): void
+{
+    $list = adm_global($key);
+    $list[] = $entry;
+    $GLOBALS[$key] = $list;
+}
+
+/** A switch a helper keeps in `$GLOBALS`; anything but `true` reads as off. */
+function adm_flag(string $key): bool
+{
+    return ($GLOBALS[$key] ?? false) === true;
+}
+
+/** The exception the JSON responder stand-ins recorded. */
+function adm_sent_state(): AdminTestSent
+{
+    $sent = $GLOBALS['adm_sent'] ?? null;
+
+    return $sent instanceof AdminTestSent ? $sent : throw new LogicException('Nothing was sent.');
+}
+
+/**
+ * What a JSON responder sent as its payload, as an array.
+ *
+ * @return array<mixed>
+ */
+function adm_data(AdminTestSent $sent): array
+{
+    return Cast::arr($sent->data);
+}
+
+/**
+ * The comparison rows a compare response carries.
+ *
+ * @return array<mixed>
+ */
+function adm_diffs(AdminTestSent $sent): array
+{
+    return Cast::arr(adm_data($sent)['diffs'] ?? null);
+}
 
 beforeEach(function (): void {
     AdminTestSpy::reset();
@@ -59,35 +112,37 @@ beforeEach(function (): void {
     $_POST = [];
     $_GET = [];
 
-    when('is_multisite')->alias(fn (): bool => $GLOBALS['adm_multisite']);
+    when('is_multisite')->alias(fn (): bool => adm_flag('adm_multisite'));
     when('current_user_can')->alias(function (string $cap): bool {
-        $GLOBALS['adm_caps'][] = $cap;
+        adm_push('adm_caps', $cap);
 
-        return $GLOBALS['adm_can'];
+        return adm_flag('adm_can');
     });
     when('check_ajax_referer')->alias(function (...$args): bool {
-        $GLOBALS['adm_nonce_calls'][] = $args;
+        adm_push('adm_nonce_calls', $args);
 
-        return $GLOBALS['adm_nonce_ok'];
+        return adm_flag('adm_nonce_ok');
     });
     when('check_admin_referer')->alias(function (...$args): int {
-        $GLOBALS['adm_admin_nonce_calls'][] = $args;
+        adm_push('adm_admin_nonce_calls', $args);
 
         return 1;
     });
     when('wp_send_json_success')->alias(function (mixed $data = null): never {
         $GLOBALS['adm_sent'] ??= new AdminTestSent(true, $data);
 
-        throw $GLOBALS['adm_sent'];
+        throw adm_sent_state();
     });
     when('wp_send_json_error')->alias(function (mixed $data = null, ?int $status = null): never {
         $GLOBALS['adm_sent'] ??= new AdminTestSent(false, $data, $status);
 
-        throw $GLOBALS['adm_sent'];
+        throw adm_sent_state();
     });
     when('wp_die')->alias(function (string $message = ''): never {
         // `finish()` ends the request, so a `wp_die()` its exception reaches would never have run.
-        $GLOBALS['adm_finished'] && throw new AdminTestFinished;
+        if (adm_flag('adm_finished')) {
+            throw new AdminTestFinished;
+        }
 
         throw new AdminTestDied($message);
     });
@@ -97,15 +152,15 @@ beforeEach(function (): void {
     when('nocache_headers')->alias(function (): void {
         AdminTestSpy::$calls[] = ['nocache_headers'];
     });
-    when('get_current_blog_id')->alias(fn (): int => $GLOBALS['adm_blog'] ?: 7);
+    when('get_current_blog_id')->alias(fn (): int => Cast::int($GLOBALS['adm_blog'] ?? 0) ?: 7);
     when('home_url')->justReturn('https://example.test/');
-    when('esc_html')->alias(fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES));
-    when('esc_attr')->alias(fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES));
-    when('esc_url')->alias(fn (mixed $s): string => str_replace('&', '&#038;', (string) $s));
+    when('esc_html')->alias(fn (mixed $s): string => htmlspecialchars(Cast::str($s), ENT_QUOTES));
+    when('esc_attr')->alias(fn (mixed $s): string => htmlspecialchars(Cast::str($s), ENT_QUOTES));
+    when('esc_url')->alias(fn (mixed $s): string => str_replace('&', '&#038;', Cast::str($s)));
     when('admin_url')->alias(fn (string $p = ''): string => 'https://example.test/wp-admin/'.$p);
     when('get_admin_url')->alias(fn (int $blog, string $p = ''): string => "https://example.test/blog-$blog/wp-admin/$p");
     when('add_query_arg')->alias(function (mixed $a, mixed $b = null, mixed $c = null): string {
-        [$args, $url] = is_array($a) ? [$a, (string) $b] : [[$a => $b], (string) $c];
+        [$args, $url] = is_array($a) ? [$a, Cast::str($b)] : [[Cast::str($a) => $b], Cast::str($c)];
 
         return $url.(str_contains($url, '?') ? '&' : '?').http_build_query($args);
     });
@@ -113,7 +168,7 @@ beforeEach(function (): void {
     when('wp_create_nonce')->alias(fn (string $a): string => 'nonce-'.$a);
     when('wp_json_encode')->alias(fn (mixed $v, int $flags = 0): string|false => json_encode($v, $flags));
     when('selected')->alias(function (mixed $selected, mixed $current = true, bool $echo = true): string {
-        $out = (string) $selected === (string) $current ? " selected='selected'" : '';
+        $out = Cast::str($selected) === Cast::str($current) ? " selected='selected'" : '';
         if ($echo) {
             echo $out;
         }
@@ -121,7 +176,7 @@ beforeEach(function (): void {
         return $out;
     });
     when('disabled')->alias(function (mixed $disabled, mixed $current = true, bool $echo = true): string {
-        $out = (string) $disabled === (string) $current ? " disabled='disabled'" : '';
+        $out = Cast::str($disabled) === Cast::str($current) ? " disabled='disabled'" : '';
         if ($echo) {
             echo $out;
         }
@@ -130,22 +185,22 @@ beforeEach(function (): void {
     });
     when('switch_to_blog')->alias(function (mixed $id): bool {
         // The type is recorded because a typed parameter would coerce a numeric string without a word.
-        $GLOBALS['adm_blog_types'][] = get_debug_type($id);
+        adm_push('adm_blog_types', get_debug_type($id));
         $GLOBALS['adm_blog'] = $id;
-        $GLOBALS['adm_blog_log'][] = "switch $id";
+        adm_push('adm_blog_log', 'switch '.Cast::str($id));
 
         return true;
     });
     when('restore_current_blog')->alias(function (): bool {
         $GLOBALS['adm_blog'] = 0;
-        $GLOBALS['adm_blog_log'][] = 'restore';
+        adm_push('adm_blog_log', 'restore');
 
         return true;
     });
 
     // The Engine's constructor installs the log table; nothing here has a database.
     redefine(Store::class.'::install', function (): void {
-        $GLOBALS['adm_blog_log'][] = 'install';
+        adm_push('adm_blog_log', 'install');
     });
     redefine(Engine::class.'::acf_ready', fn (): bool => true);
     redefine(Admin::class.'::finish', function (): never {
@@ -248,7 +303,7 @@ function adm_capture(Closure $render, bool $collapse = true): string
  */
 function adm_headers(): array
 {
-    return array_values(array_map(fn (array $c): string => $c[1], array_filter(AdminTestSpy::$calls, fn (array $c): bool => $c[0] === 'header')));
+    return array_values(array_map(fn (array $c): string => Cast::str($c[1]), array_filter(AdminTestSpy::$calls, fn (array $c): bool => $c[0] === 'header')));
 }
 
 /**
@@ -391,11 +446,11 @@ function adm_network(array $sites, array $tables, array $headers = []): string
     $GLOBALS['adm_defs'] = $tables;
     Functions\expect('get_sites')->once()->with(['number' => 0, 'deleted' => 0])->andReturn($sites);
     redefine(Site::class.'::active_defs', function (): array {
-        $names = $GLOBALS['adm_defs'][$GLOBALS['adm_blog']] ?? [];
+        $names = Cast::strings(adm_global('adm_defs')[Cast::int($GLOBALS['adm_blog'] ?? 0)] ?? []);
 
         return array_fill_keys($names, ['name' => 'x']);
     });
-    adm_store(['headers' => fn ($kind): array => $headers[$GLOBALS['adm_blog']][$kind] ?? []]);
+    adm_store(['headers' => fn ($kind): array => $headers[Cast::int($GLOBALS['adm_blog'] ?? 0)][$kind] ?? []]);
 
     return adm_capture(fn () => Admin::network_page());
 }
@@ -534,7 +589,7 @@ it('rejects a reference with characters it does not allow', function (): void {
     $sent = adm_ajax(['op' => 'snapshot_batch', 'ref' => 'bad name']);
 
     expect($sent->success)->toBeFalse()
-        ->and($sent->data['message'])->toContain("'bad name'");
+        ->and(adm_data($sent)['message'])->toContain("'bad name'");
 });
 
 it('normalizes the operation name before matching it', function (): void {
@@ -693,13 +748,13 @@ it('compares two snapshots, ignoring the fields listed, and adds the download li
     $sent = adm_ajax(['op' => 'compare', 'a' => 'before', 'b' => 'after', 'ignore' => 'x, y ,,z']);
 
     expect($sent->success)->toBeTrue()
-        ->and($sent->data['summary'])->toBe(['identical' => false])
-        ->and($sent->data['total_diffs'])->toBe(2)
-        ->and($sent->data['diffs'])->toBe([
+        ->and(adm_data($sent)['summary'])->toBe(['identical' => false])
+        ->and(adm_data($sent)['total_diffs'])->toBe(2)
+        ->and(adm_diffs($sent))->toBe([
             ['post_id' => 1, 'field' => 'f', 'a' => 'one', 'b' => '{"k":"v"}'],
             ['post_id' => 2, 'field' => 'g', 'a' => '(empty)', 'b' => 'two'],
         ])
-        ->and($sent->data['download'])->toBe('https://example.test/wp-admin/admin-post.php?action=uamswp_acfcdt_mig_dl&type=compare&a=before&b=after&ignore=x%2C+y+%2C%2Cz&_wpnonce=nonce-uamswp_acfcdt_mig')
+        ->and(adm_data($sent)['download'])->toBe('https://example.test/wp-admin/admin-post.php?action=uamswp_acfcdt_mig_dl&type=compare&a=before&b=after&ignore=x%2C+y+%2C%2Cz&_wpnonce=nonce-uamswp_acfcdt_mig')
         ->and($args->getArrayCopy())->toBe([['before', 'after', [0 => 'x', 1 => 'y', 3 => 'z']]]);
 });
 
@@ -709,7 +764,7 @@ it('shows a value that cannot be encoded as JSON in a comparison as such', funct
     $sent = adm_ajax(['op' => 'compare', 'a' => 'before', 'b' => 'after']);
 
     expect($sent->success)->toBeTrue()
-        ->and($sent->data['diffs'])->toBe([['post_id' => 1, 'field' => 'f', 'a' => '(unencodable)', 'b' => 'x']]);
+        ->and(adm_diffs($sent))->toBe([['post_id' => 1, 'field' => 'f', 'a' => '(unencodable)', 'b' => 'x']]);
 });
 
 it('compares with nothing ignored when no list is given', function (): void {
@@ -719,9 +774,9 @@ it('compares with nothing ignored when no list is given', function (): void {
     $sent = adm_ajax(['op' => 'compare', 'a' => 'before', 'b' => 'after']);
 
     expect($args->getArrayCopy())->toBe([['before', 'after', []]])
-        ->and($sent->data['total_diffs'])->toBe(0)
-        ->and($sent->data['diffs'])->toBe([])
-        ->and($sent->data['download'])->toContain('&ignore=&_wpnonce');
+        ->and(adm_data($sent)['total_diffs'])->toBe(0)
+        ->and(adm_diffs($sent))->toBe([])
+        ->and(adm_data($sent)['download'])->toContain('&ignore=&_wpnonce');
 });
 
 it('returns at most 200 differences and the full total', function (): void {
@@ -729,15 +784,15 @@ it('returns at most 200 differences and the full total', function (): void {
 
     $sent = adm_ajax(['op' => 'compare', 'a' => 'x', 'b' => 'y']);
 
-    expect($sent->data['total_diffs'])->toBe(250)
-        ->and($sent->data['diffs'])->toHaveCount(200)
-        ->and($sent->data['diffs'][199]['post_id'])->toBe(200);
+    expect(adm_data($sent)['total_diffs'])->toBe(250)
+        ->and(adm_diffs($sent))->toHaveCount(200)
+        ->and(Cast::arr(adm_diffs($sent)[199])['post_id'])->toBe(200);
 });
 
 it('shortens a long value past 300 characters and leaves 300 whole', function (): void {
     adm_compare([['post_id' => 1, 'field' => 'f', 'a' => 'X'.str_repeat('a', 299), 'b' => 'Y'.str_repeat('b', 300)]]);
 
-    $row = adm_ajax(['op' => 'compare', 'a' => 'x', 'b' => 'y'])->data['diffs'][0];
+    $row = Cast::arr(adm_diffs(adm_ajax(['op' => 'compare', 'a' => 'x', 'b' => 'y']))[0]);
 
     expect($row['a'])->toBe('X'.str_repeat('a', 299))
         ->and($row['b'])->toBe('Y'.str_repeat('b', 296)."\u{2026}");
@@ -746,7 +801,7 @@ it('shortens a long value past 300 characters and leaves 300 whole', function ()
 it('counts characters, not bytes, when shortening a value', function (): void {
     adm_compare([['post_id' => 1, 'field' => 'f', 'a' => str_repeat("\u{00e9}", 300), 'b' => str_repeat("\u{00e9}", 301)]]);
 
-    $row = adm_ajax(['op' => 'compare', 'a' => 'x', 'b' => 'y'])->data['diffs'][0];
+    $row = Cast::arr(adm_diffs(adm_ajax(['op' => 'compare', 'a' => 'x', 'b' => 'y']))[0]);
 
     expect($row['a'])->toBe(str_repeat("\u{00e9}", 300))
         ->and($row['b'])->toBe(str_repeat("\u{00e9}", 297)."\u{2026}");
@@ -1617,4 +1672,107 @@ it('adds no breakdown when the by-field key is absent', function (): void {
     ]);
 
     expect(adm_capture(fn () => Admin::page()))->not->toContain('By field');
+});
+
+/* ====================================================================== defaults for absent keys */
+
+it('renders the by-field breakdown from a run header that carries it, without asking the change rows', function (): void {
+    $by_field = [['field' => 'hdr', 'fill' => 2, 'overwrite' => 1, 'clear' => 0]];
+    adm_engine(['inventory' => fn (): array => adm_inventory(), 'posts_upto' => fn ($c): int => 0]);
+    adm_store([
+        'headers' => fn ($kind): array => $kind === 'run' ? ['bf-1' => adm_run(['by_field' => $by_field])] : [],
+        'change_summary' => fn (): never => throw new LogicException('must not be reached'),
+    ]);
+
+    $html = adm_capture(fn () => Admin::page());
+
+    expect($html)->toContain('<tbody><tr><td>hdr</td><td>2</td><td>1</td><td>0</td></tr></tbody>')
+        ->and(substr_count($html, 'By field'))->toBe(1);
+});
+
+it('adds no breakdown for a complete run header with stats and no by-field key', function (): void {
+    adm_engine(['inventory' => fn (): array => adm_inventory(), 'posts_upto' => fn ($c): int => 0]);
+    adm_store([
+        'headers' => fn ($kind): array => $kind === 'run' ? ['bf-1' => adm_run()] : [],
+        'change_summary' => fn (): never => throw new LogicException('must not be reached'),
+    ]);
+
+    $html = adm_capture(fn () => Admin::page());
+
+    expect($html)->not->toContain('By field')
+        ->and($html)->toContain('<td>6 / 9</td>');
+});
+
+it('renders an empty rollback cell for a rollback header with no status', function (): void {
+    $html = adm_page(adm_inventory(), ['run' => ['bf-1' => adm_run()], 'rollback' => ['bf-1' => ['cursor' => '2']]]);
+
+    expect($html)->toContain('<td>0</td><td></td><td><a class="button button-small"')
+        ->and($html)->not->toContain("<td>\u{2014}</td>")
+        ->and($html)->toContain('data-acfm-rollback="bf-1" data-cursor="2">Resume rollback</button>');
+});
+
+it('resumes a run header that lacks both cursor and total from zero', function (): void {
+    $asked = new ArrayObject;
+    $html = adm_page(adm_inventory(), ['run' => ['bf-4' => ['status' => 'running', 'stats' => adm_stats()]]], function ($cursor) use ($asked): int {
+        $asked[] = $cursor;
+
+        return 0;
+    });
+
+    expect($html)->toContain('data-acfm-resume="backfill" data-ref="bf-4" data-cursor="0" data-total="0" data-done="0">Resume</button>')
+        ->and($asked->getArrayCopy())->toBe([0]);
+});
+
+it('starts a snapshot with empty strings when the label and mode are absent', function (): void {
+    $args = new ArrayObject;
+    adm_engine([
+        'snapshot_start' => function ($label, $mode, $overwrite = false) use ($args): string {
+            $args[] = [$label, $mode, $overwrite];
+
+            return 'r';
+        },
+        'total_posts' => fn ($ids = null): int => 0,
+    ]);
+
+    $sent = adm_ajax(['op' => 'snapshot_start']);
+
+    expect($sent->success)->toBeTrue()
+        ->and($args->getArrayCopy())->toBe([['', '', false]]);
+});
+
+it('compares empty names with nothing ignored, and links the download with empty values, when the keys are absent', function (): void {
+    $args = new ArrayObject;
+    adm_compare([], $args);
+
+    $sent = adm_ajax(['op' => 'compare']);
+
+    expect($args->getArrayCopy())->toBe([['', '', []]])
+        ->and(adm_data($sent)['download'])->toBe('https://example.test/wp-admin/admin-post.php?action=uamswp_acfcdt_mig_dl&type=compare&a=&b=&ignore=&_wpnonce=nonce-uamswp_acfcdt_mig');
+});
+
+it('cleans an empty reference when a stored-set download has no ref key', function (): void {
+    $cleaned = new ArrayObject;
+    adm_engine(['clean_ref' => function ($ref) use ($cleaned): string {
+        $cleaned[] = $ref;
+
+        return Cast::str($ref);
+    }]);
+    adm_store(['rows' => fn (): array => []]);
+
+    expect(adm_download(['type' => 'snapshot']))->toBe('')
+        ->and($cleaned->getArrayCopy())->toBe([''])
+        ->and(adm_headers())->toContain('Content-Disposition: attachment; filename="site-7-snapshot-.jsonl"');
+});
+
+it('compares empty names with nothing ignored when a comparison download has no keys', function (): void {
+    $args = new ArrayObject;
+    adm_engine(['compare' => function ($a, $b, array $ignore = []) use ($args): array {
+        $args[] = [$a, $b, $ignore];
+
+        return ['summary' => ['identical' => true], 'diffs' => []];
+    }]);
+
+    expect(adm_download(['type' => 'compare']))->toBe("{\"summary\":{\"identical\":true}}\n")
+        ->and($args->getArrayCopy())->toBe([['', '', []]])
+        ->and(adm_headers())->toContain('Content-Disposition: attachment; filename="site-7-compare-__vs__.jsonl"');
 });

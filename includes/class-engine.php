@@ -7,6 +7,16 @@ namespace UAMSWP_ACFCDT_Migrator;
 /**
  * The migration logic, shared by the wp-admin screen and WP-CLI. Everything works on the CURRENT blog
  * in small, cursor-based batches so each web request stays short and any batch can be retried safely.
+ *
+ * @phpstan-import-type TableDef from Site
+ * @phpstan-import-type CacheEntry from Site
+ *
+ * @phpstan-type TableColumn array{column: string, acf_name: string, acf_type: string, non_empty: int, note: string}
+ * @phpstan-type TableMissing array{table: string, name: string, post_type: string, def_file: string, exists: false}
+ * @phpstan-type TableFound array{table: string, name: string, post_type: string, def_file: string, exists: true, rows: int, missing_post: int, wrong_type: int, no_row: int, extra_cols: list<string>, missing_cols: list<string>, columns: list<TableColumn>, orphans: list<string>}
+ * @phpstan-type Inventory array{blog_id: int, url: string, json_dir: string, plugin_loaded: bool, intercepts: int, hooks: list<string>, core_meta: bool, cache: array<string, CacheEntry|string>, cache_problems: list<string>, tables: list<TableMissing|TableFound>}
+ * @phpstan-type CompareSummary array{posts_a: int, posts_b: int, only_in_a: int, only_in_b: int, posts_with_diffs: int, fields_differ: int, identical: bool}
+ * @phpstan-type CompareDiff array{post_id: int, title: string, field: int|string, a: mixed, b: mixed}
  */
 class Engine
 {
@@ -115,13 +125,19 @@ class Engine
     /* ================================================================== inventory */
 
     /**
-     * @return array<string, mixed>
+     * What this site has: the plugin's state, the table map cache and one entry per table definition.
+     *
+     * A table that does not exist has only the first five keys (`exists` is `false`); one that exists has the counts,
+     * the column differences and the per-column report as well (`exists` is `true`). `cache` is the answer of
+     * `Site::cache_status()`: a `CacheEntry` per table name, or a lone `_missing` key holding a path (a string).
+     *
+     * @return Inventory
      */
     public function inventory(): array
     {
         global $wpdb;
         $guard = new HookGuard;
-        $out = [
+        $overview = [
             'blog_id' => $this->site->blog_id,
             'url' => $this->site->url,
             'json_dir' => $this->site->json_dir(),
@@ -131,25 +147,25 @@ class Engine
             'core_meta' => (bool) apply_filters('acfcdt/settings/store_acf_values_in_core_meta', true),
             'cache' => $this->site->cache_status(),
             'cache_problems' => $this->site->cache_problems(),
-            'tables' => [],
         ];
+        $tables = [];
 
         foreach ($this->site->table_defs() as $def) {
             $table = $this->site->prefixed($def['name']);
-            $t = ['table' => $table, 'name' => $def['name'], 'post_type' => $def['post_type'], 'def_file' => basename($def['file']), 'exists' => $this->site->table_exists($def['name'])];
-            if (! $t['exists']) {
-                $out['tables'][] = $t;
+            $exists = $this->site->table_exists($def['name']);
+            if (! $exists) {
+                $tables[] = ['table' => $table, 'name' => $def['name'], 'post_type' => $def['post_type'], 'def_file' => basename($def['file']), 'exists' => false];
 
                 continue;
             }
 
-            $t['rows'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table`");
-            $t['missing_post'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table` t LEFT JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.ID IS NULL");
-            $t['wrong_type'] = (int) $wpdb->get_var($wpdb->prepare(
+            $rows = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table`");
+            $missing_post = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table` t LEFT JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.ID IS NULL");
+            $wrong_type = (int) $wpdb->get_var($wpdb->prepare(
                 "SELECT COUNT(*) FROM `$table` t JOIN {$wpdb->posts} p ON p.ID = t.post_id WHERE p.post_type <> %s",
                 $def['post_type']
             ));
-            $t['no_row'] = (int) $wpdb->get_var($wpdb->prepare(
+            $no_row = (int) $wpdb->get_var($wpdb->prepare(
                 "SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN `$table` t ON t.post_id = p.ID
 				 WHERE p.post_type = %s AND p.post_status NOT IN ('auto-draft','inherit') AND t.post_id IS NULL",
                 $def['post_type']
@@ -157,9 +173,9 @@ class Engine
 
             $db_cols = $wpdb->get_col("SHOW COLUMNS FROM `$table`");
             $def_cols = array_column($def['columns'], 'name');
-            $t['extra_cols'] = array_values(array_diff($db_cols, $def_cols));
-            $t['missing_cols'] = array_values(array_diff($def_cols, $db_cols));
-            $t['columns'] = [];
+            $extra_cols = Cast::strings(array_diff($db_cols, $def_cols));
+            $missing_cols = Cast::strings(array_diff($def_cols, $db_cols));
+            $columns = [];
 
             foreach ($def['columns'] as $col) {
                 if (! $col['identifier'] || ! in_array($col['name'], $db_cols, true)) {
@@ -183,26 +199,39 @@ class Engine
                     $note = 'repeater (encoded column)';
                 }
 
-                $t['columns'][] = [
+                $columns[] = [
                     'column' => $col['name'],
                     'acf_name' => $col['identifier'].($col['identifier'] !== $col['name'] ? ' *' : ''),
-                    'acf_type' => $field ? $field['type'] : '-',
+                    'acf_type' => $field ? Cast::str($field['type']) : '-',
                     'non_empty' => $non_empty,
                     'note' => $note,
                 ];
             }
 
-            $t['orphans'] = $this->orphan_columns($def);
-            $out['tables'][] = $t;
+            $tables[] = [
+                'table' => $table,
+                'name' => $def['name'],
+                'post_type' => $def['post_type'],
+                'def_file' => basename($def['file']),
+                'exists' => true,
+                'rows' => $rows,
+                'missing_post' => $missing_post,
+                'wrong_type' => $wrong_type,
+                'no_row' => $no_row,
+                'extra_cols' => $extra_cols,
+                'missing_cols' => $missing_cols,
+                'columns' => $columns,
+                'orphans' => $this->orphan_columns($def),
+            ];
         }
 
-        return $out;
+        return $overview + ['tables' => $tables];
     }
 
     /**
      * DB columns whose identifier has no ACF field, or that aren't in the JSON at all.
      *
-     * @param  array<string, mixed>  $def  A table definition, as `Site::table_defs()` returns it.
+     * @param  TableDef  $def  A table definition, as `Site::table_defs()` returns it.
      * @return list<string>
      */
     public function orphan_columns(array $def): array
@@ -301,13 +330,13 @@ class Engine
      */
     public function snapshot_batch($label, $cursor, $limit = 25, $ids = null): array
     {
-        $info = Store::get('snapinfo', $label);
+        $info = Store::snapinfo($label);
         if (! $info) {
             throw new \RuntimeException("Snapshot '$label' was not started.");
         }
 
         $guard = new HookGuard;
-        if ($guard->has_intercepts() && str_starts_with($info['mode'], 'meta')) {
+        if ($guard->has_intercepts() && str_starts_with(Cast::str($info['mode'] ?? null), 'meta')) {
             $guard->detach();
         }
 
@@ -356,14 +385,14 @@ class Engine
      * @param  int|string  $a
      * @param  int|string  $b
      * @param  array<int, int|string>  $ignore  Field names to leave out of the comparison; only an exact match counts.
-     * @return array{summary: array<string, int|bool>, diffs: list<array<string, mixed>>}
+     * @return array{summary: CompareSummary, diffs: list<CompareDiff>}
      */
     public function compare($a, $b, array $ignore = []): array
     {
         $a = self::clean_ref($a);
         $b = self::clean_ref($b);
-        $ia = Store::get('snapinfo', $a);
-        $ib = Store::get('snapinfo', $b);
+        $ia = Store::snapinfo($a);
+        $ib = Store::snapinfo($b);
         if (! $ia || ! $ib) {
             throw new \RuntimeException('Both snapshots must exist on this site.');
         }
@@ -385,28 +414,28 @@ class Engine
             if (! isset($pa[$post_id]) || ! isset($pb[$post_id])) {
                 $key = isset($pa[$post_id]) ? 'only_in_a' : 'only_in_b';
                 $summary[$key]++;
-                $diffs[] = ['post_id' => $post_id, 'title' => isset($pa[$post_id]) ? $pa[$post_id]['post_title'] : $pb[$post_id]['post_title'], 'field' => '(whole post)', 'a' => $key === 'only_in_a' ? 'present' : null, 'b' => $key === 'only_in_b' ? 'present' : null];
+                $diffs[] = ['post_id' => $post_id, 'title' => self::record_title($pa[$post_id] ?? $pb[$post_id]), 'field' => '(whole post)', 'a' => $key === 'only_in_a' ? 'present' : null, 'b' => $key === 'only_in_b' ? 'present' : null];
 
                 continue;
             }
 
-            $fa = $pa[$post_id]['fields'];
-            $fb = $pb[$post_id]['fields'];
+            $fa = self::record_fields($pa[$post_id]);
+            $fb = self::record_fields($pb[$post_id]);
             $dirty = false;
             foreach (array_keys($fa + $fb) as $name) {
                 if (in_array($name, $ignore, true)) {
                     continue;
                 }
 
-                $va = isset($fa[$name]) ? $fa[$name]['v'] : null;
-                $vb = isset($fb[$name]) ? $fb[$name]['v'] : null;
+                $va = self::field_value($fa[$name] ?? null);
+                $vb = self::field_value($fb[$name] ?? null);
                 if (Normalizer::same($va, $vb)) {
                     continue;
                 }
 
                 $dirty = true;
                 $summary['fields_differ']++;
-                $diffs[] = ['post_id' => $post_id, 'title' => $pa[$post_id]['post_title'], 'field' => $name, 'a' => $va, 'b' => $vb];
+                $diffs[] = ['post_id' => $post_id, 'title' => self::record_title($pa[$post_id]), 'field' => $name, 'a' => $va, 'b' => $vb];
             }
 
             if ($dirty) {
@@ -417,6 +446,31 @@ class Engine
         $summary['identical'] = ! $diffs;
 
         return ['summary' => $summary, 'diffs' => $diffs];
+    }
+
+    /**
+     * @param  mixed  $record  One decoded snapshot record (see `Store::by_post()`).
+     */
+    private static function record_title($record): string
+    {
+        return Cast::str(Cast::arr($record)['post_title'] ?? '');
+    }
+
+    /**
+     * @param  mixed  $record  One decoded snapshot record (see `Store::by_post()`).
+     * @return array<mixed> The record's fields keyed by field name, each `['t' => type, 'v' => normalized value]`.
+     */
+    private static function record_fields($record): array
+    {
+        return Cast::arr(Cast::arr($record)['fields'] ?? null);
+    }
+
+    /**
+     * @param  mixed  $entry  One field of a snapshot record, or `null` when the snapshot has no such field.
+     */
+    private static function field_value($entry): mixed
+    {
+        return Cast::arr($entry)['v'] ?? null;
     }
 
     /* ================================================================== backfill */
@@ -465,7 +519,7 @@ class Engine
      */
     public function backfill_batch($stamp, $cursor, $limit = 10, $ids = null): array
     {
-        $run = Store::get('run', $stamp);
+        $run = Store::run_header($stamp);
         if (! $run) {
             throw new \RuntimeException("Backfill run '$stamp' was not started.");
         }
@@ -626,7 +680,7 @@ class Engine
         }
 
         try {
-            acf_update_value(wp_slash($value), $post_id, $field);
+            acf_update_value(is_string($value) || is_array($value) ? wp_slash($value) : $value, $post_id, $field);
         } finally {
             foreach ($hooks as $hook) {
                 remove_filter($hook, $trail, 1);
@@ -643,7 +697,7 @@ class Engine
     public function rollback_start($stamp, $force = false): string
     {
         $stamp = self::clean_ref($stamp);
-        $run = Store::get('run', $stamp);
+        $run = Store::run_header($stamp);
         if (! $run) {
             throw new \RuntimeException("No backfill run '$stamp' on this site.");
         }
@@ -652,7 +706,7 @@ class Engine
             throw new \RuntimeException("'$stamp' was a dry run — nothing to roll back.");
         }
 
-        $rb = Store::get('rollback', $stamp);
+        $rb = Store::rollback_header($stamp);
         // The default never equals 'complete', whatever its value.
         // @pest-mutate-ignore: EmptyStringToNotEmpty
         if ($rb && ($rb['status'] ?? '') === 'complete' && ! $force) {
@@ -683,15 +737,17 @@ class Engine
         $rows = Store::rows('backup', $stamp, (int) $cursor, $limit, true);
         $posts = [];
         foreach ($rows as $r) {
-            $e = json_decode($r->data, true);
-            $this->site->delete_meta_rows_for_field((int) $e['post_id'], $e['field'], ! empty($e['complex']));
-            foreach ((array) $e['rows'] as $m) {
-                $wpdb->insert($wpdb->postmeta, ['post_id' => (int) $e['post_id'], 'meta_key' => $m[0], 'meta_value' => $m[1]], ['%d', '%s', '%s']);
+            $e = Cast::arr(json_decode(Cast::str($r->data), true));
+            $post_id = Cast::int($e['post_id'] ?? 0);
+            $this->site->delete_meta_rows_for_field($post_id, Cast::str($e['field'] ?? ''), ! empty($e['complex']));
+            foreach (Cast::arr($e['rows'] ?? null) as $m) {
+                $m = Cast::arr($m);
+                $wpdb->insert($wpdb->postmeta, ['post_id' => $post_id, 'meta_key' => $m[0] ?? null, 'meta_value' => $m[1] ?? null], ['%d', '%s', '%s']);
             }
 
-            // Only the keys are read, and PHP turns a numeric string key into an integer.
-            // @pest-mutate-ignore: RemoveIntegerCast, TrueToFalse
-            $posts[(int) $e['post_id']] = true;
+            // Only the keys are read, so the value stored makes no difference.
+            // @pest-mutate-ignore: TrueToFalse
+            $posts[$post_id] = true;
             $cursor = (int) $r->id;
         }
 
@@ -701,9 +757,7 @@ class Engine
         }
 
         $done = count($rows) < $limit;
-        // Store::get() returns null or an array, and a null takes the key the same way.
-        // @pest-mutate-ignore: RemoveArrayCast
-        $rb = (array) Store::get('rollback', $stamp);
+        $rb = Store::rollback_header($stamp) ?? [];
         $rb['cursor'] = $cursor;
         if ($done) {
             $rb['status'] = 'complete';

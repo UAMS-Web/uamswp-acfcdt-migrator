@@ -303,3 +303,32 @@ it('reports the plugin as not loaded, then loaded once its core class exists', f
 it('names the plugin namespace', function (): void {
     expect(HookGuard::PLUGIN_NS)->toBe('ACFCustomDatabaseTables\\');
 });
+
+/** A values store that is not an object but names a class whose static `reset()` exists, so `is_callable()` accepts it. */
+final class HookGuardStaticStore
+{
+    public static int $resets = 0;
+
+    public static function reset(): void
+    {
+        self::$resets++;
+    }
+}
+
+it('resets an object values store as an instance', function (): void {
+    $store = Mockery::mock('stdClass');
+    $store->shouldReceive('reset')->once();
+
+    Functions\expect('acf_get_store')->once()->with('values')->andReturn($store);
+
+    HookGuard::flush_acf_values();
+});
+
+it('never calls reset on a values store that is not an object, even when it is callable', function (): void {
+    HookGuardStaticStore::$resets = 0;
+    Functions\expect('acf_get_store')->once()->with('values')->andReturn(HookGuardStaticStore::class);
+
+    HookGuard::flush_acf_values();
+
+    expect(HookGuardStaticStore::$resets)->toBe(0);
+});

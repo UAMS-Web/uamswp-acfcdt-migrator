@@ -14,6 +14,7 @@
 declare(strict_types=1);
 
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\Site;
 use UAMSWP_ACFCDT_Migrator\Store;
@@ -31,6 +32,13 @@ afterEach(function (): void {
     unset($GLOBALS['wpdb']);
 });
 
+/** The shared record of the calls the stand-ins received, in order. */
+final class EngRbLog
+{
+    /** @var list<array<mixed>> */
+    public array $log = [];
+}
+
 /**
  * Redefines `Store` and `Site` and returns the shared record.
  *
@@ -38,22 +46,18 @@ afterEach(function (): void {
  * (what `Store::rows()` returns).
  *
  * @param  array<string, mixed>  $o
- * @return ArrayObject<string, list<mixed>>
  */
-function eng_rb_wire(array $o = []): ArrayObject
+function eng_rb_wire(array $o = []): EngRbLog
 {
-    /** @var ArrayObject<string, list<mixed>> $st */
-    $st = new ArrayObject(['log' => []]);
+    $st = new EngRbLog;
     $note = function (string $name, array $args = []) use ($st): void {
-        $log = $st['log'];
-        $log[] = [$name, ...$args];
-        $st->offsetSet('log', $log);
+        $st->log[] = [$name, ...$args];
     };
 
     redefine(Store::class.'::get', function (...$a) use ($note, $o): mixed {
         $note('get', $a);
 
-        return $o['get'][$a[0].'|'.$a[1]] ?? null;
+        return Cast::arr($o['get'] ?? [])[Cast::str($a[0]).'|'.Cast::str($a[1])] ?? null;
     });
     redefine(Store::class.'::put', function (...$a) use ($note): void {
         $note('put', [...$a, 'argc='.count($a)]);
@@ -61,12 +65,12 @@ function eng_rb_wire(array $o = []): ArrayObject
     redefine(Store::class.'::count', function (...$a) use ($note, $o): int {
         $note('count', $a);
 
-        return $o['count'] ?? 0;
+        return Cast::int($o['count'] ?? 0);
     });
     redefine(Store::class.'::rows', function (...$a) use ($note, $o): array {
         $note('rows', [...$a, 'argc='.count($a)]);
 
-        return $o['rows'] ?? [];
+        return Cast::arr($o['rows'] ?? []);
     });
     redefine(Site::class.'::delete_meta_rows_for_field', function (...$a) use ($note): void {
         $note('delete_meta_rows_for_field', $a);
@@ -86,18 +90,14 @@ function eng_rb_wire(array $o = []): ArrayObject
 
 /**
  * A `$wpdb` stand-in that records every `insert()` it is handed, in the shared log.
- *
- * @param  ArrayObject<string, list<mixed>>  $st
  */
-function eng_rb_wpdb(ArrayObject $st): void
+function eng_rb_wpdb(EngRbLog $st): void
 {
     /** @var wpdb&MockInterface $wpdb */
     $wpdb = Mockery::mock('wpdb');
     $wpdb->postmeta = 'wpx_postmeta';
     $wpdb->shouldReceive('insert')->andReturnUsing(function (...$a) use ($st): int {
-        $log = $st['log'];
-        $log[] = ['insert', ...$a, 'argc='.count($a)];
-        $st->offsetSet('log', $log);
+        $st->log[] = ['insert', ...$a, 'argc='.count($a)];
 
         return 1;
     });
@@ -133,23 +133,21 @@ function eng_rb_entry(int $post_id, string $field, array $rows, ?bool $complex =
 /**
  * The logged calls with the given names, one row per call.
  *
- * @param  ArrayObject<string, list<mixed>>  $st
- * @return list<array<int, mixed>>
+ * @return list<array<mixed>>
  */
-function eng_rb_calls(ArrayObject $st, string ...$names): array
+function eng_rb_calls(EngRbLog $st, string ...$names): array
 {
-    return array_values(array_filter($st['log'] ?? [], fn (array $row): bool => in_array($row[0], $names, true)));
+    return array_values(array_filter($st->log, fn (array $row): bool => in_array($row[0], $names, true)));
 }
 
 /**
  * The names of every logged call, in order.
  *
- * @param  ArrayObject<string, list<mixed>>  $st
  * @return list<string>
  */
-function eng_rb_order(ArrayObject $st): array
+function eng_rb_order(EngRbLog $st): array
 {
-    return array_map(fn (array $row): string => $row[0], $st['log'] ?? []);
+    return array_map(fn (array $row): string => Cast::str($row[0]), $st->log);
 }
 
 /** The dash the messages hold, written as an escape so no literal U+2014 sits in this file. */
@@ -163,14 +161,23 @@ function eng_rb_dash(): string
  *
  * @param  list<object>  $rows
  * @param  array<string, mixed>  $o  `eng_rb_wire()` options
- * @return array{0: array<string, mixed>, 1: ArrayObject<string, list<mixed>>}
+ * @return array{0: array<string, mixed>, 1: EngRbLog}
  */
-function eng_rb_batch(array $rows, array $o = [], mixed $cursor = 0, int $limit = 100): array
+function eng_rb_batch(array $rows, array $o = [], int|string $cursor = 0, int $limit = 100): array
 {
     $st = eng_rb_wire(['rows' => $rows] + $o);
     eng_rb_wpdb($st);
 
     return [(new Engine)->rollback_batch('r1', $cursor, $limit), $st];
+}
+
+/**
+ * Calls `rollback_start()` with the force flag exactly as given, whatever its type (the engine's docblock says `bool`,
+ * and one dataset hands it a truthy integer).
+ */
+function eng_rb_start(string $stamp, mixed $force): string
+{
+    return Cast::str((new ReflectionMethod(Engine::class, 'rollback_start'))->invoke(new Engine, $stamp, $force));
 }
 
 // rollback_start()
@@ -223,14 +230,14 @@ it('refuses a run already rolled back unless forced', function (mixed $force, bo
     ]);
 
     if ($throws) {
-        expect(fn (): string => (new Engine)->rollback_start('r1', $force))
+        expect(fn (): string => eng_rb_start('r1', $force))
             ->toThrow(RuntimeException::class, "Run 'r1' was already rolled back.")
             ->and(eng_rb_calls($st, 'put'))->toBe([]);
 
         return;
     }
 
-    expect((new Engine)->rollback_start('r1', $force))->toBe('r1')
+    expect(eng_rb_start('r1', $force))->toBe('r1')
         ->and(eng_rb_calls($st, 'put'))->toHaveCount(1);
 })->with([
     'not forced' => [false, true],
@@ -261,13 +268,13 @@ it('stores a running record with the number of backups to restore', function ():
         ->and(array_slice($put[0], 0, 5))->toBe(['put', 'rollback', 'r1', 0, ''])
         ->and($put[0][6])->toBe('argc=5');
 
-    $data = $put[0][5];
+    $data = Cast::arr($put[0][5]);
     expect(array_keys($data))->toBe(['status', 'started', 'total'])
         ->and($data['status'])->toBe('running')
         ->and($data['total'])->toBe(7)
         ->and($data['started'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/')
-        ->and(strtotime($data['started']))->toBeGreaterThanOrEqual($before)
-        ->and(strtotime($data['started']))->toBeLessThanOrEqual(time());
+        ->and(strtotime(Cast::str($data['started'])))->toBeGreaterThanOrEqual($before)
+        ->and(strtotime(Cast::str($data['started'])))->toBeLessThanOrEqual(time());
 });
 
 it('reads the run, then the rollback, before counting and storing', function (): void {
@@ -321,7 +328,7 @@ it('hands the post id on as an integer', function (): void {
     [, $st] = eng_rb_batch([eng_rb_row(9, eng_rb_entry(7, 'name', [['name', 'Ann']]))]);
 
     expect(eng_rb_calls($st, 'delete_meta_rows_for_field')[0][1])->toBeInt()->toBe(7)
-        ->and(eng_rb_calls($st, 'insert')[0][2]['post_id'])->toBeInt()->toBe(7);
+        ->and(Cast::arr(eng_rb_calls($st, 'insert')[0][2])['post_id'])->toBeInt()->toBe(7);
 });
 
 it('passes a complex field on as complex, and a missing flag as not complex', function (?bool $complex, bool $expected): void {
@@ -401,25 +408,25 @@ it('completes the rollback when the page is short', function (): void {
 
     expect($result)->toBe(['processed' => 1, 'cursor' => 9, 'done' => true]);
 
-    $data = eng_rb_calls($st, 'put')[0][5];
+    $data = Cast::arr(eng_rb_calls($st, 'put')[0][5]);
     expect(array_keys($data))->toBe(['status', 'total', 'cursor', 'finished'])
         ->and($data['status'])->toBe('complete')
         ->and($data['cursor'])->toBe(9)
         ->and($data['finished'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/')
-        ->and(strtotime($data['finished']))->toBeLessThanOrEqual($before + 1);
+        ->and(strtotime(Cast::str($data['finished'])))->toBeLessThanOrEqual($before + 1);
 });
 
 it('keeps the cursor it was given when there is nothing more', function (): void {
     [$result, $st] = eng_rb_batch([], [], '40', 10);
 
     expect($result)->toBe(['processed' => 0, 'cursor' => '40', 'done' => true])
-        ->and(eng_rb_calls($st, 'put')[0][5]['cursor'])->toBe('40');
+        ->and(Cast::arr(eng_rb_calls($st, 'put')[0][5])['cursor'])->toBe('40');
 });
 
 it('starts a record when the store holds none for the rollback', function (): void {
     [, $st] = eng_rb_batch([eng_rb_row(9, eng_rb_entry(7, 'a', []))], [], 100, 5);
 
-    $data = eng_rb_calls($st, 'put')[0][5];
+    $data = Cast::arr(eng_rb_calls($st, 'put')[0][5]);
     expect(array_keys($data))->toBe(['cursor', 'status', 'finished']);
 });
 
@@ -445,4 +452,14 @@ it('restores nothing for a backup whose rows are null', function (): void {
     expect($result['processed'])->toBe(1)
         ->and(eng_rb_calls($st, 'delete_meta_rows_for_field'))->toHaveCount(1)
         ->and(eng_rb_calls($st, 'insert'))->toBe([]);
+});
+
+it('restores a backup with no post id as post zero and a missing field as an empty name', function (): void {
+    [$result, $st] = eng_rb_batch([eng_rb_row(9, ['rows' => [['k', 'v']]])]);
+
+    expect($result['processed'])->toBe(1)
+        ->and(eng_rb_calls($st, 'delete_meta_rows_for_field'))->toBe([['delete_meta_rows_for_field', 0, '', false]])
+        ->and(eng_rb_calls($st, 'insert'))->toBe([
+            ['insert', 'wpx_postmeta', ['post_id' => 0, 'meta_key' => 'k', 'meta_value' => 'v'], ['%d', '%s', '%s'], 'argc=3'],
+        ]);
 });

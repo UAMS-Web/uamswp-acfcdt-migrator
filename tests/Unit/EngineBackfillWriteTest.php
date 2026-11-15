@@ -28,6 +28,7 @@
 declare(strict_types=1);
 
 use Mockery\MockInterface;
+use UAMSWP_ACFCDT_Migrator\Cast;
 use UAMSWP_ACFCDT_Migrator\Engine;
 use UAMSWP_ACFCDT_Migrator\HookGuard;
 use UAMSWP_ACFCDT_Migrator\Site;
@@ -36,30 +37,59 @@ use UAMSWP_ACFCDT_Migrator\Store;
 use function Brain\Monkey\Functions\when;
 use function Patchwork\redefine;
 
-beforeEach(function (): void {
-    $GLOBALS['eng_bw_state'] = new ArrayObject([
-        'puts' => [],
-        'mode' => 'on',
-        'meta' => [],
-        'hooks' => [],
-        'cleaned' => [],
-        'updates' => [],
-        'added' => [],
-        'removed' => [],
-        'after' => null,
-        'side_effect' => null,
-        'throw' => false,
-    ]);
+/** The recorded state of one test: what the stand-ins were asked to do and what the stand-in postmeta holds. */
+final class EngBwState
+{
+    /** @var list<array{0: string, 1: string, 2: int, 3: string, 4: array<mixed>, 5: string}> */
+    public array $puts = [];
 
-    /** @var ArrayObject<string, mixed> $state */
-    $state = $GLOBALS['eng_bw_state'];
+    public string $mode = 'on';
+
+    /** @var array<string, mixed> */
+    public array $meta = [];
+
+    /** @var array<string, list<callable>> */
+    public array $hooks = [];
+
+    /** @var list<int> */
+    public array $cleaned = [];
+
+    /** @var list<array{0: mixed, 1: int, 2: string}> */
+    public array $updates = [];
+
+    /** @var array<string, array{0: int, 1: int}> */
+    public array $added = [];
+
+    /** @var array<string, int> */
+    public array $removed = [];
+
+    public mixed $after = null;
+
+    /** @var (Closure(EngBwState): void)|null */
+    public ?Closure $side_effect = null;
+
+    public bool $throw = false;
+}
+
+/** The state of the running test. */
+function eng_bw_state(): EngBwState
+{
+    $state = $GLOBALS['eng_bw_state'] ?? null;
+    if (! $state instanceof EngBwState) {
+        throw new RuntimeException('The engine write test state is not set up.');
+    }
+
+    return $state;
+}
+
+beforeEach(function (): void {
+    $state = new EngBwState;
+    $GLOBALS['eng_bw_state'] = $state;
 
     redefine(Store::class.'::install', fn (): null => null);
     redefine(Store::class.'::get', fn ($kind, $ref, $post_id = 0, $field = ''): ?array => $kind === 'run' ? ['dry' => false, 'no_clear' => false] : null);
     redefine(Store::class.'::put', function ($kind, $ref, $post_id, $field, $data, $mode = 'replace') use ($state): int {
-        $puts = $state['puts'];
-        $puts[] = [$kind, $ref, $post_id, $field, $data, $mode];
-        $state['puts'] = $puts;
+        $state->puts[] = [Cast::str($kind), Cast::str($ref), Cast::int($post_id), Cast::str($field), Cast::arr($data), Cast::str($mode)];
 
         return 1;
     });
@@ -68,10 +98,10 @@ beforeEach(function (): void {
     redefine(HookGuard::class.'::__construct', fn (): null => null);
     redefine(HookGuard::class.'::has_intercepts', fn (): bool => true);
     redefine(HookGuard::class.'::attach', function () use ($state): void {
-        $state['mode'] = 'on';
+        $state->mode = 'on';
     });
     redefine(HookGuard::class.'::detach', function () use ($state): void {
-        $state['mode'] = 'off';
+        $state->mode = 'off';
     });
     redefine(HookGuard::class.'::reset_caches', fn (): null => null);
     redefine(HookGuard::class.'::flush_acf_values', fn (): null => null);
@@ -79,9 +109,10 @@ beforeEach(function (): void {
     redefine(Site::class.'::post_types', fn (): array => ['expertise']);
     redefine(Site::class.'::meta_rows_for_field', function ($post_id, $name, $complex) use ($state): array {
         $rows = [];
-        foreach ($state['meta'] as $key => $value) {
+        foreach ($state->meta as $key => $value) {
             [$pid, $meta_key] = explode(':', (string) $key, 2);
-            if ((int) $pid === (int) $post_id && ($meta_key === $name || $meta_key === '_'.$name || ($complex && str_starts_with(ltrim($meta_key, '_'), $name.'_')))) {
+            $name = Cast::str($name);
+            if ((int) $pid === Cast::int($post_id) && ($meta_key === $name || $meta_key === '_'.$name || ($complex && str_starts_with(ltrim($meta_key, '_'), $name.'_')))) {
                 $rows[] = [$meta_key, $value];
             }
         }
@@ -91,57 +122,44 @@ beforeEach(function (): void {
 
     when('get_current_blog_id')->justReturn(5);
     when('home_url')->alias(fn (string $path = ''): string => 'https://example.test'.$path);
-    when('wp_slash')->alias(fn (mixed $v): string => 'slashed('.$v.')');
+    when('wp_slash')->alias(fn (mixed $v): string => 'slashed('.Cast::str($v).')');
     when('wp_cache_delete')->justReturn(true);
     when('clean_post_cache')->alias(function (int $id) use ($state): void {
-        $cleaned = $state['cleaned'];
-        $cleaned[] = $id;
-        $state['cleaned'] = $cleaned;
+        $state->cleaned[] = $id;
     });
     when('add_filter')->alias(function (string $hook, callable $cb, int $priority = 10, int $args = 1) use ($state): bool {
-        $hooks = $state['hooks'];
-        $hooks[$hook][] = $cb;
-        $state['hooks'] = $hooks;
-        $added = $state['added'];
-        $added[$hook] = [$priority, $args];
-        $state['added'] = $added;
+        $state->hooks[$hook][] = $cb;
+        $state->added[$hook] = [$priority, $args];
 
         return true;
     });
     when('remove_filter')->alias(function (string $hook, callable $cb, int $priority = 10) use ($state): bool {
-        $removed = $state['removed'];
-        $removed[$hook] = $priority;
-        $state['removed'] = $removed;
-        $hooks = $state['hooks'];
-        $hooks[$hook] = array_values(array_filter($hooks[$hook] ?? [], fn ($c): bool => $c !== $cb));
-        $state['hooks'] = $hooks;
+        $state->removed[$hook] = $priority;
+        $state->hooks[$hook] = array_values(array_filter($state->hooks[$hook] ?? [], fn (callable $c): bool => $c !== $cb));
 
         return true;
     });
     when('acf_get_value')->alias(function (int $post_id, array $field) use ($state): mixed {
-        if ($state['mode'] === 'on') {
+        if ($state->mode === 'on') {
             return 'new';
         }
 
-        if ($state['after'] !== null && $state['updates'] !== []) {
-            return $state['after'];
+        if ($state->after !== null && $state->updates !== []) {
+            return $state->after;
         }
 
-        return $state['meta'][$post_id.':'.$field['name']] ?? null;
+        return $state->meta[$post_id.':'.Cast::str($field['name'])] ?? null;
     });
     when('acf_update_value')->alias(function (mixed $value, int $post_id, array $field) use ($state): bool {
-        $updates = $state['updates'];
-        $updates[] = [$value, $post_id, $field['name']];
-        $state['updates'] = $updates;
-        $meta = $state['meta'];
-        $meta[$post_id.':'.$field['name']] = preg_replace('/^slashed\((.*)\)$/', '$1', (string) $value);
-        $state['meta'] = $meta;
+        $name = Cast::str($field['name']);
+        $state->updates[] = [$value, $post_id, $name];
+        $state->meta[$post_id.':'.$name] = preg_replace('/^slashed\((.*)\)$/', '$1', Cast::str($value));
 
-        if ($state['side_effect'] !== null) {
-            ($state['side_effect'])($state);
+        if ($state->side_effect instanceof Closure) {
+            ($state->side_effect)($state);
         }
 
-        if ($state['throw']) {
+        if ($state->throw) {
             throw new RuntimeException('write failed');
         }
 
@@ -157,13 +175,13 @@ afterEach(function (): void {
  * Runs one batch over one post holding the given field, whose current postmeta value is `old`.
  *
  * @param  array<string, mixed>  $meta  `"<post>:<meta_key>" => value` rows the stand-in postmeta holds
- * @param  array<string, mixed>  $field
+ * @param  array{name: string, key: string, type: string}  $field
  * @return array<string, mixed>
  */
 function eng_bw_run(array $meta, array $field = ['name' => 'physician_expertise', 'key' => 'field_expertise_physicians', 'type' => 'text'], int $post_id = 55): array
 {
-    $state = $GLOBALS['eng_bw_state'];
-    $state['meta'] = $meta;
+    $state = eng_bw_state();
+    $state->meta = $meta;
 
     redefine(Site::class.'::fields_for_post', fn ($id, $type): array => [$field['name'] => $field]);
 
@@ -180,11 +198,11 @@ function eng_bw_run(array $meta, array $field = ['name' => 'physician_expertise'
 /**
  * The recorded `Store::put()` calls of one kind.
  *
- * @return list<array<int, mixed>>
+ * @return list<array{0: string, 1: string, 2: int, 3: string, 4: array<mixed>, 5: string}>
  */
 function eng_bw_puts(string $kind): array
 {
-    return array_values(array_filter($GLOBALS['eng_bw_state']['puts'], fn (array $p): bool => $p[0] === $kind));
+    return array_values(array_filter(eng_bw_state()->puts, fn (array $p): bool => $p[0] === $kind));
 }
 
 // the write step
@@ -194,26 +212,26 @@ it("backs up the field's own rows, then writes the effective value slashed", fun
 
     expect($result['written'])->toBe(1)
         ->and($result['mismatches'])->toBe(0)
-        ->and($GLOBALS['eng_bw_state']['updates'])->toBe([['slashed(new)', 55, 'physician_expertise']])
+        ->and(eng_bw_state()->updates)->toBe([['slashed(new)', 55, 'physician_expertise']])
         ->and(eng_bw_puts('backup'))->toBe([[
             'backup', 'r1', 55, 'physician_expertise',
             ['post_id' => 55, 'field' => 'physician_expertise', 'complex' => false, 'rows' => [['physician_expertise', 'old'], ['_physician_expertise', 'field_physician_expertise']]],
             'ignore',
         ]])
-        ->and($GLOBALS['eng_bw_state']['cleaned'])->toBe([55]);
+        ->and(eng_bw_state()->cleaned)->toBe([55]);
 });
 
 it('does not write a field whose value is unchanged', function (): void {
     $result = eng_bw_run(['55:physician_expertise' => 'new']);
 
     expect($result['written'])->toBe(0)
-        ->and($GLOBALS['eng_bw_state']['updates'])->toBe([])
+        ->and(eng_bw_state()->updates)->toBe([])
         ->and(eng_bw_puts('backup'))->toBe([])
-        ->and($GLOBALS['eng_bw_state']['cleaned'])->toBe([]);
+        ->and(eng_bw_state()->cleaned)->toBe([]);
 });
 
 it('reports a write whose result does not read back', function (): void {
-    $GLOBALS['eng_bw_state']['after'] = 'other';
+    eng_bw_state()->after = 'other';
 
     $result = eng_bw_run(['55:physician_expertise' => 'old']);
 
@@ -227,21 +245,21 @@ it('reports a write whose result does not read back', function (): void {
 /** The stand-in for ACF Extended's bidirectional write: the related post's value and reference rows change. */
 function eng_bw_bidirectional(int $related): Closure
 {
-    return function (ArrayObject $state) use ($related): void {
+    return function (EngBwState $state) use ($related): void {
         foreach (['update_post_metadata', 'add_post_metadata'] as $hook) {
-            foreach ($state['hooks'][$hook] ?? [] as $callback) {
+            foreach ($state->hooks[$hook] ?? [] as $callback) {
                 $callback(null, $related, '_physician_expertise', 'field_expertise_physicians');
             }
         }
 
-        $meta = $state['meta'];
+        $meta = $state->meta;
         $meta[$related.':_physician_expertise'] = 'field_expertise_physicians';
-        $state['meta'] = $meta;
+        $state->meta = $meta;
     };
 }
 
 it('backs up the reference row ACF rewrites on a related post, as it was before the write', function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = eng_bw_bidirectional(37);
+    eng_bw_state()->side_effect = eng_bw_bidirectional(37);
 
     eng_bw_run([
         '55:physician_expertise' => 'old',
@@ -258,12 +276,12 @@ it('backs up the reference row ACF rewrites on a related post, as it was before 
             ['post_id' => 37, 'field' => 'physician_expertise', 'complex' => false, 'rows' => [['physician_expertise', 'a:1:{i:0;s:2:"55";}'], ['_physician_expertise', 'field_physician_expertise']]],
             'ignore',
         ])
-        ->and($GLOBALS['eng_bw_state']['meta']['37:_physician_expertise'])->toBe('field_expertise_physicians');
+        ->and(eng_bw_state()->meta['37:_physician_expertise'])->toBe('field_expertise_physicians');
 });
 
 it("backs up other rows of the written post too, but not the field's own", function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, 55, 'physician_expertise', 'x');
             $callback(null, 55, '_physician_expertise', 'x');
             $callback(null, 55, '_sibling', 'x');
@@ -278,8 +296,8 @@ it("backs up other rows of the written post too, but not the field's own", funct
 });
 
 it("treats a complex field's sub-field rows on its own post as its own", function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, 55, 'physician_expertise_0_name', 'x');
             $callback(null, 55, '_physician_expertise_0_name', 'x');
         }
@@ -291,8 +309,8 @@ it("treats a complex field's sub-field rows on its own post as its own", functio
 });
 
 it('backs up a sub-field-shaped row on another post even for a complex field', function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, 37, 'physician_expertise_0_name', 'x');
         }
     };
@@ -303,8 +321,8 @@ it('backs up a sub-field-shaped row on another post even for a complex field', f
 });
 
 it('compares object ids as integers and meta keys as strings', function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, '55', 'physician_expertise', 'x');
             $callback(null, '37', 5, 'x');
         }
@@ -315,9 +333,21 @@ it('compares object ids as integers and meta keys as strings', function (): void
     expect(array_column(eng_bw_puts('backup'), 2, 3))->toBe(['physician_expertise' => 55, '5' => 37]);
 });
 
+it('treats a numeric string object id as the post being written, so it adds no extra backup of the field', function (): void {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
+            $callback(null, '55', 'physician_expertise', 'x');
+        }
+    };
+
+    eng_bw_run(['55:physician_expertise' => 'old']);
+
+    expect(array_column(eng_bw_puts('backup'), 3))->toBe(['physician_expertise']);
+});
+
 it("does not take a longer name for a complex field's own sub-field rows", function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, 55, 'physician_expertisefoo', 'x');
         }
     };
@@ -328,8 +358,8 @@ it("does not take a longer name for a complex field's own sub-field rows", funct
 });
 
 it('leaves a same-named sibling of a simple field on its own post to be backed up', function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $callback(null, 55, 'physician_expertise_extra', 'x');
         }
     };
@@ -340,9 +370,9 @@ it('leaves a same-named sibling of a simple field on its own post to be backed u
 });
 
 it('watches adds and deletes as well as updates', function (): void {
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state): void {
+    eng_bw_state()->side_effect = function (EngBwState $state): void {
         foreach (['add_post_metadata' => 'added', 'delete_post_metadata' => 'deleted'] as $hook => $key) {
-            foreach ($state['hooks'][$hook] ?? [] as $callback) {
+            foreach ($state->hooks[$hook] ?? [] as $callback) {
                 $callback(null, 37, $key, 'x');
             }
         }
@@ -355,8 +385,8 @@ it('watches adds and deletes as well as updates', function (): void {
 
 it('returns the filter value untouched so the write goes ahead', function (): void {
     $seen = new ArrayObject;
-    $GLOBALS['eng_bw_state']['side_effect'] = function (ArrayObject $state) use ($seen): void {
-        foreach ($state['hooks']['update_post_metadata'] ?? [] as $callback) {
+    eng_bw_state()->side_effect = function (EngBwState $state) use ($seen): void {
+        foreach ($state->hooks['update_post_metadata'] ?? [] as $callback) {
             $seen['checks'] = [$callback(null, 37, 'x', 'v'), $callback('short-circuit', 37, 'x', 'v')];
         }
     };
@@ -369,15 +399,15 @@ it('returns the filter value untouched so the write goes ahead', function (): vo
 it('registers the watch at the first priority and removes it once the write is done', function (): void {
     eng_bw_run(['55:physician_expertise' => 'old']);
 
-    $state = $GLOBALS['eng_bw_state'];
-    expect($state['added'])->toBe(['update_post_metadata' => [1, 3], 'add_post_metadata' => [1, 3], 'delete_post_metadata' => [1, 3]])
-        ->and($state['removed'])->toBe(['update_post_metadata' => 1, 'add_post_metadata' => 1, 'delete_post_metadata' => 1])
-        ->and(array_filter($state['hooks']))->toBe([]);
+    $state = eng_bw_state();
+    expect($state->added)->toBe(['update_post_metadata' => [1, 3], 'add_post_metadata' => [1, 3], 'delete_post_metadata' => [1, 3]])
+        ->and($state->removed)->toBe(['update_post_metadata' => 1, 'add_post_metadata' => 1, 'delete_post_metadata' => 1])
+        ->and(array_filter($state->hooks))->toBe([]);
 });
 
 it('removes the watch even when the write throws', function (): void {
-    $GLOBALS['eng_bw_state']['throw'] = true;
+    eng_bw_state()->throw = true;
 
     expect(fn (): array => eng_bw_run(['55:physician_expertise' => 'old']))->toThrow(RuntimeException::class, 'write failed')
-        ->and(array_filter($GLOBALS['eng_bw_state']['hooks']))->toBe([]);
+        ->and(array_filter(eng_bw_state()->hooks))->toBe([]);
 });

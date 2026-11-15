@@ -18,6 +18,7 @@ class Loader
      */
     public static function load(string $dir): void
     {
+        require_once $dir.'/includes/class-cast.php';
         require_once $dir.'/includes/class-hook-guard.php';
         require_once $dir.'/includes/class-normalizer.php';
         require_once $dir.'/includes/class-site.php';

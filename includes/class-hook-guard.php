@@ -20,7 +20,7 @@ class HookGuard
 {
     const PLUGIN_NS = 'ACFCustomDatabaseTables\\';
 
-    /** @var list<array{0: string, 1: mixed, 2: int, 3: mixed}> [hook, callable, priority, accepted_args] */
+    /** @var list<array{0: string, 1: callable, 2: int, 3: int}> [hook, callable, priority, accepted_args] */
     private array $callbacks = [];
 
     /**
@@ -49,7 +49,7 @@ class HookGuard
             foreach ($wp_hook->callbacks as $priority => $cbs) {
                 foreach ($cbs as $cb) {
                     $fn = $cb['function'];
-                    if (! is_array($fn) || ! is_object($fn[0])) {
+                    if (! is_array($fn) || ! is_object($fn[0]) || ! is_callable($fn)) {
                         continue;
                     }
 
@@ -58,7 +58,7 @@ class HookGuard
                         continue;
                     }
 
-                    $this->callbacks[] = [$hook, $fn, $priority, $cb['accepted_args']];
+                    $this->callbacks[] = [$hook, $fn, $priority, Cast::int($cb['accepted_args'])];
 
                     if (str_ends_with($class, 'ACFGetFieldIntercept') && method_exists($fn[0], 'reset')) {
                         $this->get_intercepts[spl_object_hash($fn[0])] = $fn[0]->reset(...);
@@ -143,8 +143,11 @@ class HookGuard
     {
         if (function_exists('acf_get_store')) {
             $store = acf_get_store('values');
-            if ($store) {
-                $store->reset();
+            // The store is ACF's `ACF_Data`, which the stubs leave untyped. `is_callable()` accepts a `reset()` that
+            // the object answers through `__call()` as well as one it declares.
+            $reset = [$store, 'reset'];
+            if (is_object($store) && is_callable($reset)) {
+                $reset();
             }
         }
     }

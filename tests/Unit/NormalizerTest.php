@@ -419,3 +419,9 @@ it('reads sub fields, layouts and layout sub fields that are not arrays as one e
             [['acf_fc_layout' => 'x', 'a' => 1]],
         ))->toBe([['a' => '1', 'acf_fc_layout' => 'x']]);
 });
+
+it('files a cell matched by key under an empty name when its sub field has no name', function (): void {
+    $field = ['type' => 'repeater', 'sub_fields' => [['key' => 'field_a', 'type' => 'text']]];
+
+    expect(Normalizer::value($field, [['field_a' => 'x']]))->toBe([['' => 'x']]);
+});

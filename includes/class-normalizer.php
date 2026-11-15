@@ -24,7 +24,7 @@ class Normalizer
     const ID_TYPES = ['taxonomy', 'relationship', 'post_object', 'gallery', 'user', 'image', 'file'];
 
     /**
-     * @param  array<string, mixed>  $field  ACF field array
+     * @param  array<mixed>  $field  ACF field array
      * @param  mixed  $v  raw value from acf_get_value()
      * @return array<mixed>|string|null
      */
@@ -68,7 +68,7 @@ class Normalizer
         }
 
         if (! is_array($v)) {
-            $s = (string) $v;
+            $s = Cast::str($v);
             // An empty repeater / flexible field can surface as its row count of 0.
             if (($type === 'repeater' || $type === 'flexible_content') && $s === '0') {
                 return null;
@@ -90,14 +90,15 @@ class Normalizer
             case 'flexible_content':
                 $layouts = [];
                 foreach ((array) ($field['layouts'] ?? []) as $layout) {
+                    $layout = Cast::arr($layout);
                     if (isset($layout['name'])) {
-                        $layouts[$layout['name']] = isset($layout['sub_fields']) ? (array) $layout['sub_fields'] : [];
+                        $layouts[Cast::str($layout['name'])] = isset($layout['sub_fields']) ? (array) $layout['sub_fields'] : [];
                     }
                 }
 
                 $out = [];
                 foreach ($v as $row) {
-                    $name = is_array($row) && isset($row['acf_fc_layout']) ? $row['acf_fc_layout'] : '';
+                    $name = is_array($row) && isset($row['acf_fc_layout']) ? Cast::str($row['acf_fc_layout']) : '';
                     $subs = $layouts[$name] ?? [];
                     $norm = self::row($subs, $row);
                     $out[] = is_array($norm) ? $norm + ['acf_fc_layout' => $name] : $norm;
@@ -136,12 +137,13 @@ class Normalizer
         $by_key = [];
         $by_name = [];
         foreach ($subs as $sub) {
+            $sub = Cast::arr($sub);
             if (isset($sub['key'])) {
-                $by_key[$sub['key']] = $sub;
+                $by_key[Cast::str($sub['key'])] = $sub;
             }
 
             if (isset($sub['name']) && $sub['name'] !== '') {
-                $by_name[$sub['name']] = $sub;
+                $by_name[Cast::str($sub['name'])] = $sub;
             }
         }
 
@@ -153,7 +155,7 @@ class Normalizer
 
             $sub = $by_key[$k] ?? $by_name[$k] ?? null;
             if ($sub) {
-                $name = $sub['name'];
+                $name = Cast::str($sub['name'] ?? '');
                 $norm = self::value($sub, $val);
             } else {
                 // An array key written as a numeric string is stored as an int either way.
@@ -188,7 +190,7 @@ class Normalizer
         }
 
         if (! is_array($v)) {
-            return (string) $v;
+            return Cast::str($v);
         }
 
         if (self::is_list($v)) {

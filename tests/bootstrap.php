@@ -36,6 +36,7 @@ if (! defined('ABSPATH')) {
  * Integration suite, or in a unit test that calls a registering function.
  * Composer-autoloaded classes need no line here.
  */
+require_once __DIR__.'/../includes/class-cast.php';
 require_once __DIR__.'/../includes/class-normalizer.php';
 require_once __DIR__.'/../includes/class-hook-guard.php';
 require_once __DIR__.'/../includes/class-site.php';
