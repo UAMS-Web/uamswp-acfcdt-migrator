@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 (2026-11-15)
+- Requires WordPress 6.8 or later (`Requires at least` in the plugin header) and PHP 8.2 or later. Queries bind table names with the `%i` placeholder, which needs WordPress 6.2 or later.
+- Fix: a backfill now backs up every other postmeta row a field write touches (for example the reference row ACF Extended's bidirectional relationships rewrite on the related post), so a rollback restores it.
+- The plugin header names UAMS Web Services as the author and carries a Plugin URI; the README lists the developers.
+- The plugin version is read from the header, so the header is the only place it is set.
+- A GitHub download of the plugin holds only the files the plugin runs.
+- Internal: Pest unit and integration suites, mutation testing, PHPStan at level 10, Rector and Pint.
+
 ## 0.2.2 — 2026-10-06
 - Inventory reports, per table, whether ACF Custom Database Tables is actually reading it, based on its runtime table map cache (`.cache/_table_map.php`). Red warning in wp-admin when it isn't (see Find-a-Doc #813).
 - A real backfill is refused while the plugin isn't reading a table, unless explicitly overridden (`--allow-stale-cache` / checkbox). Dry runs are still allowed.
