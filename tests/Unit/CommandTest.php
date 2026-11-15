@@ -55,7 +55,7 @@ final class CommandTestState
     /** @var list<string> */
     public static array $dirs = [];
 
-    /** @var list<array<string, mixed>> */
+    /** @var list<array<mixed>> */
     public static array $sites_args = [];
 
     public static int $var_calls = 0;
@@ -86,12 +86,12 @@ beforeEach(function (): void {
     CommandTestCli::$calls = [];
     CommandTestCli::$runner = (object) ['config' => []];
 
-    when('WP_CLI\Utils\get_flag_value')->alias(fn ($assoc, $flag, $default = null) => $assoc[$flag] ?? $default);
+    when('WP_CLI\Utils\get_flag_value')->alias(fn ($assoc, $flag, $default = null) => Cast::arr($assoc)[Cast::str($flag)] ?? $default);
     when('WP_CLI\Utils\format_items')->alias(function ($format, $items, $fields): void {
         CommandTestState::$tables[] = [$format, $items, $fields];
     });
     when('WP_CLI\Utils\make_progress_bar')->alias(function ($message, $count): CommandTestProgressBar {
-        $bar = new CommandTestProgressBar($message, $count);
+        $bar = new CommandTestProgressBar(Cast::str($message), Cast::int($count));
         CommandTestState::$bars[] = $bar;
 
         return $bar;
@@ -101,7 +101,7 @@ beforeEach(function (): void {
     });
     when('get_current_blog_id')->justReturn(7);
     when('home_url')->justReturn('https://example.test/');
-    when('absint')->alias(fn ($n): int => abs((int) $n));
+    when('absint')->alias(fn ($n): int => abs(Cast::int($n)));
 
     // The Engine's constructor installs the log table; nothing here has a database.
     redefine(Store::class.'::install', fn (): null => null);
@@ -175,7 +175,7 @@ function cmd_call_text(string $type): array
  * One entry a mocked engine or child-process closure recorded, read back as a list.
  *
  * @param  ArrayObject<int, mixed>  $seen
- * @return array<int, mixed>
+ * @return array<mixed>
  */
 function cmd_seen(ArrayObject $seen, int $index): array
 {
@@ -210,7 +210,7 @@ it('lists snapshots and runs as one table', function (): void {
                 'run-b' => ['stats' => ['fields' => 9, 'write_mismatch' => 2], 'status' => 'done', 'created' => '2026-01-04'],
                 'run-c' => ['created' => '2026-01-05'],
             ],
-            default => throw new LogicException("Unexpected header kind: $kind"),
+            default => throw new LogicException('Unexpected header kind: '.Cast::str($kind)),
         },
         'change_summary' => fn ($stamp): array => ['stats' => ['fields' => 3, 'write_mismatch' => 1]],
     ]);
@@ -317,7 +317,7 @@ function cmd_snapshot_engine(ArrayObject $seen, array $batches = []): array
         'snapshot_start' => function ($label, $mode, $force) use ($seen): string {
             $seen[] = ['start', $label, $mode, $force];
 
-            return 'label-'.$label;
+            return 'label-'.Cast::str($label);
         },
         'total_posts' => function ($ids) use ($seen): int {
             $seen[] = ['total', $ids];
@@ -422,7 +422,7 @@ it('compares two snapshots and reports they are identical', function (): void {
 it('passes the ignored fields trimmed, with blanks dropped', function (): void {
     $seen = new ArrayObject;
     cmd_engine(['compare' => function ($a, $b, $ignore) use ($seen): array {
-        $seen->exchangeArray($ignore);
+        $seen->exchangeArray(Cast::arr($ignore));
 
         return cmd_compare_result();
     }]);
@@ -506,7 +506,7 @@ it('cuts a value at 157 characters and an ellipsis once it passes 160', function
 it('reads a bare --ignore-fields flag as the one name 1', function (): void {
     $seen = new ArrayObject;
     cmd_engine(['compare' => function ($a, $b, $ignore) use ($seen): array {
-        $seen->exchangeArray($ignore);
+        $seen->exchangeArray(Cast::arr($ignore));
 
         return cmd_compare_result();
     }]);
@@ -551,7 +551,7 @@ function cmd_backfill_engine(ArrayObject $seen, array $batches, array $summary):
         'backfill_start' => function ($dry, $no_clear, $stamp, $allow) use ($seen): string {
             $seen[] = ['start', $dry, $no_clear, $stamp, $allow];
 
-            return 'run-'.$stamp;
+            return 'run-'.Cast::str($stamp);
         },
         'total_posts' => function ($ids) use ($seen): int {
             $seen[] = ['total', $ids];
@@ -790,7 +790,8 @@ function cmd_network(array $sites, array $table_names = ['provider']): MockInter
     when('get_sites')->alias(function (array $args) use ($sites): array {
         CommandTestState::$sites_args[] = $args;
 
-        return array_map(fn (array $s): object => (object) ['blog_id' => $s[0], 'domain' => $s[1], 'path' => $s[2]], $sites);
+        // A real `WP_Site` carries `blog_id` as a string.
+        return array_map(fn (array $s): object => (object) ['blog_id' => (string) $s[0], 'domain' => $s[1], 'path' => $s[2]], $sites);
     });
     redefine(Site::class.'::table_defs', fn (): array => array_fill_keys($table_names, []));
 
@@ -802,7 +803,8 @@ function cmd_network(array $sites, array $table_names = ['provider']): MockInter
     }
 
     $wpdb = Mockery::mock('wpdb');
-    $wpdb->shouldReceive('get_blog_prefix')->andReturnUsing(fn (int $id): string => 'wp_'.$id.'_');
+    // Mockery would coerce a numeric string into an `int` parameter, so the type is checked here.
+    $wpdb->shouldReceive('get_blog_prefix')->andReturnUsing(fn (mixed $id): string => is_int($id) ? 'wp_'.$id.'_' : throw new LogicException('get_blog_prefix() takes an int blog id.'));
     $wpdb->shouldReceive('esc_like')->andReturnUsing(fn (string $s): string => $s);
     $wpdb->shouldReceive('prepare')->andReturnUsing(fn (string $q, string $v): string => $q.'|'.$v);
     $wpdb->shouldReceive('get_var')->andReturnUsing(function (string $q) use ($has): ?string {
@@ -836,7 +838,7 @@ function cmd_children(ArrayObject $seen, array $codes = []): void
     redefine(Command::class.'::run_child', function ($command, $args, $assoc, $url) use ($seen, $codes): int {
         $seen[] = [$command, $args, $assoc, $url];
 
-        return $codes[$url] ?? 0;
+        return $codes[Cast::str($url)] ?? 0;
     });
 }
 
@@ -1104,11 +1106,11 @@ function cmd_archive(array $defs, array $tables, array $acf_fields = [], bool $a
         return $dir;
     });
     redefine(Site::class.'::active_defs', fn (): array => $defs);
-    redefine(Site::class.'::prefixed', fn ($name): string => 'wp_'.$name);
+    redefine(Site::class.'::prefixed', fn ($name): string => 'wp_'.Cast::str($name));
 
-    when('sanitize_file_name')->alias(fn ($s): string => 'clean-'.$s);
+    when('sanitize_file_name')->alias(fn ($s): string => 'clean-'.Cast::str($s));
     when('wp_json_encode')->alias('json_encode');
-    when('esc_sql')->alias(fn ($s): string => 'e_'.$s);
+    when('esc_sql')->alias(fn ($s): string => 'e_'.Cast::str($s));
     when('acf_get_field')->alias(fn ($ident): array|false => $acf_knows_everything || in_array($ident, $acf_fields, true) ? ['key' => $ident] : false);
 
     $wpdb = Mockery::mock('wpdb');
@@ -1184,7 +1186,7 @@ it('stops the archive of a table whose orphaned-columns file cannot be written',
     $env = cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'col_a', 'col_c'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [],
             $sql => [],
         ]]],
         ['field_a']
@@ -1203,7 +1205,7 @@ it('archives a table to JSON lines, its orphaned columns to CSV, and a manifest'
         ['wp_provider' => [
             'columns' => ['id', 'post_id', 'col_a', 'col_b', 'col_c'],
             'results' => [
-                'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => $rows,
+                'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => $rows,
                 $orphan_sql => [['post_id' => '10', 'col_b' => 'orphan, "quoted"', 'col_c' => '']],
             ],
         ]],
@@ -1243,7 +1245,7 @@ it('archives a table to JSON lines, its orphaned columns to CSV, and a manifest'
         ])
         ->and($env['queries']->getArrayCopy())->toBe([
             'SHOW COLUMNS FROM `wp_provider`',
-            ['SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]', ARRAY_A],
+            ['SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]', ARRAY_A],
             'SHOW COLUMNS FROM `wp_provider`',
             [$orphan_sql, ARRAY_A],
         ]);
@@ -1253,7 +1255,7 @@ it('does not escape slashes or unicode in the JSON lines', function (): void {
     $env = cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'col_a'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [['id' => '1', 'col_a' => "a/b \u{e9}"]],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [['id' => '1', 'col_a' => "a/b \u{e9}"]],
         ]]],
         ['field_a']
     );
@@ -1268,8 +1270,8 @@ it('pages a table with an id by the last id it read', function (): void {
     $env = cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'col_a'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => $first,
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[500]' => [['id' => '501', 'col_a' => 'v']],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => $first,
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",500]' => [['id' => '501', 'col_a' => 'v']],
         ]]],
         ['field_a']
     );
@@ -1305,7 +1307,7 @@ it('writes no orphan file when every column is mapped to an ACF field or is a ke
     $env = cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'post_id', 'col_a'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [],
         ]]],
         ['field_a']
     );
@@ -1327,7 +1329,7 @@ it('treats a column mapped to an identifier with no ACF field as an orphan', fun
     $env = cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a'], ['col_b', 'field_gone'], ['col_blank', '']])],
         ['wp_provider' => ['columns' => ['id', 'post_id', 'col_a', 'col_b'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [],
             $sql => [],
         ]]],
         ['field_a']
@@ -1344,7 +1346,7 @@ it('counts a column with no mapped identifier as an orphan even when ACF would a
     cmd_archive(
         [cmd_def('provider', [['col_a', 'field_a']])],
         ['wp_provider' => ['columns' => ['id', 'col_a', 'col_c'], 'results' => [
-            'SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [],
+            'SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [],
             $sql => [],
         ]]],
         [],
@@ -1360,8 +1362,8 @@ it('lists every archived table in the manifest and the dump command', function (
     $env = cmd_archive(
         [cmd_def('provider', [['a', 'fa']]), cmd_def('location', [['b', 'fb']])],
         [
-            'wp_provider' => ['columns' => ['id', 'a'], 'results' => ['SELECT * FROM `wp_provider` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => [['id' => '1', 'a' => 'x']]]],
-            'wp_location' => ['columns' => ['id', 'b'], 'results' => ['SELECT * FROM `wp_location` WHERE id > %d ORDER BY id ASC LIMIT 500|[0]' => []]],
+            'wp_provider' => ['columns' => ['id', 'a'], 'results' => ['SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_provider",0]' => [['id' => '1', 'a' => 'x']]]],
+            'wp_location' => ['columns' => ['id', 'b'], 'results' => ['SELECT * FROM %i WHERE id > %d ORDER BY id ASC LIMIT 500|["wp_location",0]' => []]],
         ],
         ['fa', 'fb']
     );
@@ -1442,7 +1444,7 @@ it('lists a rollback with no status as a bare rollback label', function (): void
             'snapinfo' => [],
             'rollback' => ['run-b' => ['created' => '2026-01-04']],
             'run' => ['run-b' => ['stats' => ['fields' => 9, 'write_mismatch' => 2], 'created' => '2026-01-04']],
-            default => throw new LogicException("Unexpected header kind: $kind"),
+            default => throw new LogicException('Unexpected header kind: '.Cast::str($kind)),
         },
     ]);
 

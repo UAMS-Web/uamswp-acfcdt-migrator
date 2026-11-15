@@ -59,3 +59,24 @@ namespace WP_CLI {
         public function __call($method, $args): void {}
     }
 }
+
+namespace WP_CLI\Utils {
+    /**
+     * `php-stubs/wp-cli-stubs` types every value as a string. WP-CLI also accepts `true` for a bare flag and an array
+     * for a repeated one, and the command passes its options as it read them.
+     *
+     * @param  array<string, mixed>  $assoc_args
+     * @return string
+     */
+    function assoc_args_to_str($assoc_args) {}
+
+    /**
+     * `php-stubs/wp-cli-stubs` types the options as `string|bool` values; WP-CLI returns whatever the option holds.
+     *
+     * @param  array<string, mixed>  $assoc_args
+     * @param  string  $flag
+     * @param  mixed  $default
+     * @return mixed
+     */
+    function get_flag_value($assoc_args, $flag, $default = null) {}
+}

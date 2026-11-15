@@ -592,8 +592,8 @@ it('throws when the posts query fails', function (): void {
  * The query `Site::posts()` runs, and what it prepared it from.
  *
  * @param  list<string>  $types
- * @param  array<int, int|string>|int|string|null  $ids
- * @return array{0: array<int, stdClass>|null, 1: array<string>, 2: list<array{0: string, 1: array<mixed>}>}
+ * @param  array<mixed>|int|string|null  $ids
+ * @return array{0: array<int, object>|null, 1: array<string>, 2: list<array{0: string, 1: array<mixed>}>}
  */
 function site_posts(array $types, array|int|string|null $ids = null, int|string $limit = 0): array
 {
@@ -605,7 +605,7 @@ function site_posts(array $types, array|int|string|null $ids = null, int|string 
         return [(object) ['ID' => 1]];
     });
 
-    $found = (new Site)->posts($types, $ids, $limit);
+    $found = (new Site)->posts($types, is_array($ids) ? array_values(array_filter($ids, static fn ($id): bool => is_int($id) || is_string($id))) : $ids, $limit);
 
     return [$found, $ran->getArrayCopy(), site_prepared_log()];
 }
@@ -615,8 +615,8 @@ it('selects every post of the given types except auto-drafts and revisions', fun
 
     expect($found)->toEqual([(object) ['ID' => 1]])
         ->and($prepared)->toBe([[
-            "SELECT ID, post_type, post_status, post_title, post_modified FROM wp_posts\n\t\t\t WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit')",
-            [['provider', 'location']],
+            "SELECT ID, post_type, post_status, post_title, post_modified FROM %i\n\t\t\t WHERE post_type IN (%s,%s) AND post_status NOT IN ('auto-draft','inherit')",
+            [['wp_posts', 'provider', 'location']],
         ]])
         ->and($ran)->toBe([$prepared[0][0].'|'.json_encode($prepared[0][1]).' ORDER BY ID ASC']);
 });
@@ -691,7 +691,7 @@ function site_acf(array $groups, array $fields): void
     when('acf_get_fields')->alias(function (array $group) use ($fields): mixed {
         site_push('site_acf_log', ['fields', $group['key']]);
 
-        return $fields[$group['key']] ?? false;
+        return $fields[Cast::str($group['key'])] ?? false;
     });
 }
 
@@ -791,8 +791,8 @@ it('keeps the fields of different groups apart for one post type', function (): 
 it('does not mistake one post type and its groups for another', function (): void {
     $by_type = ['p' => [['key' => 'q']], 'y' => [['key' => 'x']]];
     $fields = ['q' => [['name' => 'from_q', 'type' => 'text']], 'x' => [['name' => 'from_x', 'type' => 'text']]];
-    when('acf_get_field_groups')->alias(fn (array $args): array => isset($args['post_type']) ? ($by_type[$args['post_type']] ?? []) : []);
-    when('acf_get_fields')->alias(fn (array $group): array => $fields[$group['key']]);
+    when('acf_get_field_groups')->alias(fn (array $args): array => isset($args['post_type']) ? ($by_type[Cast::str($args['post_type'])] ?? []) : []);
+    when('acf_get_fields')->alias(fn (array $group): array => $fields[Cast::str($group['key'])]);
 
     $site = new Site;
 
@@ -816,11 +816,11 @@ it('selects the meta rows of a simple field and its key reference', function ():
     $rows ??= [];
 
     expect($GLOBALS['site_prepared'])->toBe([[
-        'SELECT meta_key, meta_value FROM wp_postmeta WHERE post_id = %d AND (meta_key = %s OR meta_key = %s) ORDER BY meta_id ASC',
-        [[12, 'my_field', '_my_field']],
+        'SELECT meta_key, meta_value FROM %i WHERE post_id = %d AND (meta_key = %s OR meta_key = %s) ORDER BY meta_id ASC',
+        [['wp_postmeta', 12, 'my_field', '_my_field']],
     ]])
         ->and($rows[0][1])->toBe('ARRAY_N')
-        ->and($rows[0][0])->toStartWith('SELECT meta_key, meta_value FROM wp_postmeta');
+        ->and($rows[0][0])->toStartWith('SELECT meta_key, meta_value FROM %i');
 });
 
 it('selects the sub-field rows of a complex field too, with the name escaped for LIKE', function (): void {
@@ -830,8 +830,8 @@ it('selects the sub-field rows of a complex field too, with the name escaped for
     (new Site)->meta_rows_for_field(12, 'my_field', true);
 
     expect($GLOBALS['site_prepared'])->toBe([[
-        'SELECT meta_key, meta_value FROM wp_postmeta WHERE post_id = %d AND (meta_key = %s OR meta_key = %s OR meta_key LIKE %s OR meta_key LIKE %s) ORDER BY meta_id ASC',
-        [[12, 'my_field', '_my_field', 'my\\_field\\_%', '\\_my\\_field\\_%']],
+        'SELECT meta_key, meta_value FROM %i WHERE post_id = %d AND (meta_key = %s OR meta_key = %s OR meta_key LIKE %s OR meta_key LIKE %s) ORDER BY meta_id ASC',
+        [['wp_postmeta', 12, 'my_field', '_my_field', 'my\\_field\\_%', '\\_my\\_field\\_%']],
     ]]);
 });
 
@@ -842,7 +842,7 @@ it('deletes the same rows it selects', function (bool $complex, string $where, a
     $deleted = (new Site)->delete_meta_rows_for_field(12, 'my_field', $complex);
 
     expect($deleted)->toBe(4)
-        ->and(site_prepared_log())->toBe([["DELETE FROM wp_postmeta WHERE post_id = %d AND $where", [array_merge([12], $params)]]]);
+        ->and(site_prepared_log())->toBe([["DELETE FROM %i WHERE post_id = %d AND $where", [array_merge(['wp_postmeta', 12], $params)]]]);
 })->with([
     'simple' => [false, '(meta_key = %s OR meta_key = %s)', ['my_field', '_my_field']],
     'complex' => [true, '(meta_key = %s OR meta_key = %s OR meta_key LIKE %s OR meta_key LIKE %s)', ['my_field', '_my_field', 'my\\_field\\_%', '\\_my\\_field\\_%']],
@@ -859,7 +859,7 @@ it('hands the prepared delete to the database', function (): void {
 
     (new Site)->delete_meta_rows_for_field(3, 'f', false);
 
-    expect($ran->getArrayCopy())->toBe(['DELETE FROM wp_postmeta WHERE post_id = %d AND (meta_key = %s OR meta_key = %s)|[[3,"f","_f"]]']);
+    expect($ran->getArrayCopy())->toBe(['DELETE FROM %i WHERE post_id = %d AND (meta_key = %s OR meta_key = %s)|[["wp_postmeta",3,"f","_f"]]']);
 });
 
 /* ====================================================================== output folder */

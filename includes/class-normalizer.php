@@ -256,7 +256,7 @@ class Normalizer
      * True if an ID field holds something that isn't an ID (e.g. a corrupted string like "10522]").
      * Those are reported for manual review instead of being written.
      *
-     * @param  array<string, mixed>  $field
+     * @param  array<mixed>  $field
      * @param  mixed  $normalized
      */
     public static function has_invalid_ids(array $field, $normalized): bool
@@ -277,7 +277,7 @@ class Normalizer
     }
 
     /**
-     * @param  array<string, mixed>  $field
+     * @param  array<mixed>  $field
      */
     public static function is_complex(array $field): bool
     {

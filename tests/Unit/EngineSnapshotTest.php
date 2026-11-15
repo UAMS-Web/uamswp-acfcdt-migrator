@@ -439,7 +439,7 @@ it('asks the database for posts after the cursor, a page at a time', function ()
     eng_snap_batch(eng_snap_engine(['post_types' => fn (): array => ['doctor', 'clinic']]), new ArrayObject, [], 'before', '41', 10, [3, '4']);
 
     expect(eng_snap_global('eng_snap_prepared'))->toHaveCount(1)
-        ->and(Cast::arr(eng_snap_global('eng_snap_prepared')[0])[1])->toBe([['doctor', 'clinic', 41]])
+        ->and(Cast::arr(eng_snap_global('eng_snap_prepared')[0])[1])->toBe([['wpx_posts', 'doctor', 'clinic', 41]])
         ->and(eng_snap_global('eng_snap_executed')[0])->toEndWith(' AND ID IN (3,4) ORDER BY ID ASC LIMIT 10');
 });
 
@@ -574,8 +574,8 @@ function eng_snap_rec(string $title, array $fields): array
  *
  * @param  array<int, array<string, mixed>>  $a
  * @param  array<int, array<string, mixed>>  $b
- * @param  array<string, mixed>  $info_a
- * @param  array<string, mixed>  $info_b
+ * @param  array<mixed>  $info_a
+ * @param  array<mixed>  $info_b
  */
 function eng_snap_two(array $a, array $b, array $info_a = ['status' => 'complete'], array $info_b = ['status' => 'complete']): EngSnapLog
 {

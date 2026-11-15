@@ -315,7 +315,7 @@ it('refuses a live run while the site has cache problems, unless overridden or d
 
     if ($throws) {
         expect(fn (): string => eng_bf_start($dry, false, 'r1', $allow, $engine))
-            ->toThrow(RuntimeException::class, implode(' ', $problems).' (Override only if you have decided postmeta is the current copy.)')
+            ->toThrow(RuntimeException::class, implode(' ', Cast::strings($problems)).' (Override only if you have decided postmeta is the current copy.)')
             ->and(eng_bf_calls($st, 'get'))->toBe([]);
 
         return;

@@ -56,3 +56,14 @@ Every entry heading is `## YYYY-MM-DD`, a space, and a short title. Leave exactl
 **Rejected.** ACF Extended Pro with a key secret: nothing the migrator uses is Pro-only, and it would add a secret for no coverage. A private store for all three plugins: ACF Pro's terms are silent on keeping copies and its grant requires destroying copies on termination. No CI integration job: it leaves CI without parity with local runs.
 
 **Companion.** [#76](https://github.com/UAMS-Web/uamswp-acfcdt-migrator/issues/76).
+
+
+## 2026-11-15 Table names reach `wpdb::prepare()` as `%i` placeholders, and the plugin requires WordPress 6.8 (#31)
+
+**Decision.** Every `wpdb::prepare()` template binds its table name through a `%i` identifier placeholder instead of interpolating it, and the plugin header declares `Requires at least: 6.8`, the floor the stubs already assume (`%i` needs 6.2 or later, so 6.8 covers it). The two fragments that stay interpolated are built only from string literals (`Site::meta_where()` and the `$verb`, `$op`, `$order` and `$in` pieces), and `Store::count()` types its `$where_sql` argument `literal-string`, so PHPStan accepts every template at level 10 without a suppression.
+
+**Why.** PHPStan level 10 types the `wpdb::prepare()` query as a literal string, and a table name read from `$wpdb` or `Store::table()` is not one. An identity helper that asserted `literal-string` would have satisfied the check without proving anything; `%i` lets the check hold on the real code.
+
+**Rejected.** An identity helper declaring `@return literal-string` around the 18 templates: it passes the check by assertion and weakens it for every later query. A WordPress floor below 6.2: `%i` does not exist before it. A floor of 6.2: the operator set the floor at 6.8.
+
+**Companion.** [#31](https://github.com/UAMS-Web/uamswp-acfcdt-migrator/issues/31).
